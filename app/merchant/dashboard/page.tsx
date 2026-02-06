@@ -1,12 +1,8 @@
 "use client";
 
 import { useGlobal } from "@/context/global-context";
-import {
-  PRODUCTS,
-  fetchMerchantProducts,
-  syncShopifyProducts,
-  type Product,
-} from "@/lib/mock-data";
+import { fetcher } from "@/lib/fetcher";
+import type { ApiProduct } from "@/lib/types";
 import {
   Box,
   CheckCircle2,
@@ -18,51 +14,39 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import useSWR from "swr";
 
 export default function MerchantDashboardPage() {
-  const { merchantSession, addProducts, products: contextProducts } =
-    useGlobal();
+  const { merchantSession } = useGlobal();
   const router = useRouter();
-  const [products, setProducts] = useState<Product[]>([]);
   const [syncing, setSyncing] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  const loadProducts = useCallback(async () => {
-    if (!merchantSession) return;
-    setLoading(true);
-    const fetched = await fetchMerchantProducts(merchantSession.id);
-    // Merge with context products (newly synced ones)
-    const contextMerchantProducts = contextProducts.filter(
-      (p) => p.merchantId === merchantSession.id
-    );
-    const allProducts = [...fetched, ...contextMerchantProducts];
-    // Deduplicate by id
-    const uniqueProducts = allProducts.filter(
-      (p, i, arr) => arr.findIndex((x) => x.id === p.id) === i
-    );
-    setProducts(uniqueProducts);
-    setLoading(false);
-  }, [merchantSession, contextProducts]);
+  const apiUrl = merchantSession
+    ? `/api/products?status=all&merchantId=${merchantSession.id}`
+    : null;
+
+  const { data: products, isLoading, mutate } = useSWR<ApiProduct[]>(apiUrl, fetcher);
 
   useEffect(() => {
     if (!merchantSession) {
       router.push("/merchant");
       return;
     }
-    if (!merchantSession.shopifyConfigured) {
+    if (!merchantSession.shopify_configured) {
       router.push("/merchant/onboarding");
-      return;
     }
-    loadProducts();
-  }, [merchantSession, router, loadProducts]);
+  }, [merchantSession, router]);
 
   const handleSync = async () => {
     if (!merchantSession) return;
     setSyncing(true);
-    const newProducts = await syncShopifyProducts(merchantSession.id);
-    addProducts(newProducts);
-    setProducts((prev) => [...prev, ...newProducts]);
+    try {
+      await fetch(`/api/merchants/${merchantSession.id}/sync`, { method: "POST" });
+      mutate(); // Refresh products list from API
+    } catch {
+      // handle error silently
+    }
     setSyncing(false);
   };
 
@@ -74,10 +58,9 @@ export default function MerchantDashboardPage() {
     );
   }
 
-  const liveCount = products.filter((p) => p.status === "LIVE").length;
-  const pendingCount = products.filter(
-    (p) => p.status === "PENDING_REVIEW"
-  ).length;
+  const productList = products ?? [];
+  const liveCount = productList.filter((p) => p.offer_status === "LIVE").length;
+  const pendingCount = productList.filter((p) => p.offer_status === "PENDING_REVIEW").length;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -87,18 +70,14 @@ export default function MerchantDashboardPage() {
             <LayoutDashboard className="h-6 w-6 text-primary" />
             Dashboard
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Welcome back, {merchantSession.name}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Welcome back, {merchantSession.name}</p>
         </div>
         <button
           onClick={handleSync}
           disabled={syncing}
           className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
         >
-          <RefreshCw
-            className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`}
-          />
+          <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
           {syncing ? "Syncing..." : "Sync Products"}
         </button>
       </div>
@@ -112,9 +91,7 @@ export default function MerchantDashboardPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Total Products</p>
-              <p className="text-2xl font-bold text-foreground">
-                {products.length}
-              </p>
+              <p className="text-2xl font-bold text-foreground">{productList.length}</p>
             </div>
           </div>
         </div>
@@ -136,9 +113,7 @@ export default function MerchantDashboardPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Pending Review</p>
-              <p className="text-2xl font-bold text-foreground">
-                {pendingCount}
-              </p>
+              <p className="text-2xl font-bold text-foreground">{pendingCount}</p>
             </div>
           </div>
         </div>
@@ -147,30 +122,21 @@ export default function MerchantDashboardPage() {
       {/* Product Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">
-            Your Products
-          </h2>
-          <Link
-            href="/merchant/products"
-            className="text-sm font-medium text-primary hover:underline"
-          >
+          <h2 className="text-lg font-semibold text-foreground">Your Products</h2>
+          <Link href="/merchant/products" className="text-sm font-medium text-primary hover:underline">
             View All
           </Link>
         </div>
 
-        {loading ? (
+        {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
           </div>
-        ) : products.length === 0 ? (
+        ) : productList.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Box className="mb-4 h-12 w-12 text-muted-foreground" />
-            <h3 className="mb-2 text-lg font-semibold text-foreground">
-              No products yet
-            </h3>
-            <p className="mb-4 text-sm text-muted-foreground">
-              Sync your Shopify store to import products
-            </p>
+            <h3 className="mb-2 text-lg font-semibold text-foreground">No products yet</h3>
+            <p className="mb-4 text-sm text-muted-foreground">Sync your Shopify store to import products</p>
             <button
               onClick={handleSync}
               disabled={syncing}
@@ -185,56 +151,32 @@ export default function MerchantDashboardPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Product
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    SKU
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Price
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Status
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">SKU</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Price</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {products.slice(0, 10).map((product) => (
+                {productList.slice(0, 10).map((product) => (
                   <tr key={product.id} className="hover:bg-muted/30">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-                          <Image
-                            src={product.image}
-                            alt={product.title}
-                            fill
-                            className="object-cover"
-                            sizes="40px"
-                          />
+                          <Image src={product.image_url} alt={product.title} fill className="object-cover" sizes="40px" />
                         </div>
-                        <span className="text-sm font-medium text-foreground">
-                          {product.title}
-                        </span>
+                        <span className="text-sm font-medium text-foreground">{product.title}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {product.sku}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">
-                      INR {product.basePrice.toLocaleString()}
-                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">{product.sku}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-foreground">INR {product.base_price.toLocaleString()}</td>
                     <td className="px-6 py-4">
                       <span
                         className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          product.status === "LIVE"
-                            ? "bg-success/10 text-success"
-                            : "bg-warning/10 text-warning"
+                          product.offer_status === "LIVE" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
                         }`}
                       >
-                        {product.status === "LIVE"
-                          ? "Live"
-                          : "Pending Review"}
+                        {product.offer_status === "LIVE" ? "Live" : "Pending Review"}
                       </span>
                     </td>
                   </tr>

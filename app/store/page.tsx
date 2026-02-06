@@ -1,7 +1,8 @@
 "use client";
 
 import { useGlobal } from "@/context/global-context";
-import { CATEGORIES, PRODUCTS } from "@/lib/mock-data";
+import { fetcher } from "@/lib/fetcher";
+import type { ApiCategory, ApiProduct } from "@/lib/types";
 import {
   BookOpen,
   ChefHat,
@@ -17,6 +18,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import useSWR from "swr";
 
 const ICON_MAP: Record<string, React.ReactNode> = {
   ChefHat: <ChefHat className="h-8 w-8" />,
@@ -47,8 +49,12 @@ const HERO_SLIDES = [
 
 export default function StorePage() {
   const { selectedBank } = useGlobal();
-  const liveProducts = PRODUCTS.filter((p) => p.status === "LIVE");
-  const featured = liveProducts.slice(0, 4);
+
+  const { data: categories } = useSWR<ApiCategory[]>("/api/categories", fetcher);
+  const { data: products } = useSWR<ApiProduct[]>("/api/products?status=LIVE", fetcher);
+
+  const topCategories = categories?.filter((c) => c.parent_id === null) ?? [];
+  const featured = products?.slice(0, 4) ?? [];
 
   const [currentSlide, setCurrentSlide] = useState(0);
 
@@ -67,8 +73,10 @@ export default function StorePage() {
     return () => clearInterval(timer);
   }, [nextSlide]);
 
-  const calculatePoints = (price: number) =>
-    Math.ceil(price / selectedBank.pointRatio).toLocaleString();
+  const calculatePoints = (price: number) => {
+    const rate = selectedBank?.points_to_currency_rate ?? 0.25;
+    return Math.ceil(price / rate).toLocaleString();
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -135,14 +143,14 @@ export default function StorePage() {
           Shop by Category
         </h2>
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
-          {CATEGORIES.map((cat) => (
+          {topCategories.map((cat) => (
             <Link
               key={cat.id}
-              href={`/store/search?category=${cat.id}`}
+              href={`/store/search?category=${cat.slug}`}
               className="group flex flex-col items-center gap-3 rounded-xl border border-border bg-card p-6 text-center transition-all hover:border-primary hover:shadow-md"
             >
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-accent text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                {ICON_MAP[cat.icon]}
+                {cat.icon ? ICON_MAP[cat.icon] : <ShoppingBag className="h-8 w-8" />}
               </div>
               <span className="text-sm font-medium text-foreground">
                 {cat.name}
@@ -165,50 +173,56 @@ export default function StorePage() {
             View All
           </Link>
         </div>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          {featured.map((product) => (
-            <Link
-              key={product.id}
-              href={`/store/${product.id}`}
-              className="group overflow-hidden rounded-xl border border-border bg-card transition-all hover:shadow-lg"
-            >
-              <div className="relative aspect-square overflow-hidden bg-muted">
-                <Image
-                  src={product.image}
-                  alt={product.title}
-                  fill
-                  className="object-cover transition-transform group-hover:scale-105"
-                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-                />
-              </div>
-              <div className="p-4">
-                <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {product.brand}
-                </p>
-                <h3 className="mb-2 line-clamp-2 text-sm font-semibold text-foreground">
-                  {product.title}
-                </h3>
-                <div className="mb-2 flex items-center gap-1">
-                  <Star className="h-3.5 w-3.5 fill-warning text-warning" />
-                  <span className="text-xs font-medium text-foreground">
-                    {product.rating}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    ({product.reviewCount.toLocaleString()})
-                  </span>
+        {!products ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {featured.map((product) => (
+              <Link
+                key={product.id}
+                href={`/store/${product.id}`}
+                className="group overflow-hidden rounded-xl border border-border bg-card transition-all hover:shadow-lg"
+              >
+                <div className="relative aspect-square overflow-hidden bg-muted">
+                  <Image
+                    src={product.image_url}
+                    alt={product.title}
+                    fill
+                    className="object-cover transition-transform group-hover:scale-105"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                  />
                 </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-lg font-bold text-primary">
-                    {calculatePoints(product.basePrice)} pts
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    ({selectedBank.name})
-                  </span>
+                <div className="p-4">
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {product.brand_name}
+                  </p>
+                  <h3 className="mb-2 line-clamp-2 text-sm font-semibold text-foreground">
+                    {product.title}
+                  </h3>
+                  <div className="mb-2 flex items-center gap-1">
+                    <Star className="h-3.5 w-3.5 fill-warning text-warning" />
+                    <span className="text-xs font-medium text-foreground">
+                      {product.rating}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      ({product.review_count.toLocaleString()})
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-lg font-bold text-primary">
+                      {calculatePoints(product.base_price)} pts
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      ({selectedBank?.name ?? "..."})
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

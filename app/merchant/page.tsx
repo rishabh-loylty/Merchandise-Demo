@@ -1,18 +1,15 @@
 "use client";
 
-import { useGlobal } from "@/context/global-context";
-import {
-  INITIAL_MERCHANTS,
-  createMerchant,
-  type MerchantType,
-} from "@/lib/mock-data";
+import { useGlobal, type MerchantSession } from "@/context/global-context";
+import { fetcher } from "@/lib/fetcher";
+import type { ApiMerchant } from "@/lib/types";
 import { Building2, LogIn, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import useSWR from "swr";
 
 export default function MerchantPage() {
-  const { merchantSession, setMerchantSession, addMerchant, merchants } =
-    useGlobal();
+  const { merchantSession, setMerchantSession } = useGlobal();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   const [selectedMerchantId, setSelectedMerchantId] = useState("");
@@ -20,11 +17,11 @@ export default function MerchantPage() {
   const [registerEmail, setRegisterEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const allMerchants = [...INITIAL_MERCHANTS, ...merchants];
+  const { data: merchants, mutate } = useSWR<ApiMerchant[]>("/api/merchants", fetcher);
 
   useEffect(() => {
     if (merchantSession) {
-      if (!merchantSession.shopifyConfigured) {
+      if (!merchantSession.shopify_configured) {
         router.push("/merchant/onboarding");
       } else {
         router.push("/merchant/dashboard");
@@ -41,21 +38,37 @@ export default function MerchantPage() {
   }
 
   const handleLogin = () => {
-    const merchant = allMerchants.find((m) => m.id === selectedMerchantId);
+    const merchant = merchants?.find((m) => m.id === Number(selectedMerchantId));
     if (merchant) {
-      setMerchantSession(merchant);
+      setMerchantSession({
+        id: merchant.id,
+        name: merchant.name,
+        email: merchant.email,
+        shopify_configured: merchant.shopify_configured,
+      });
     }
   };
 
   const handleRegister = async () => {
     if (!registerName.trim() || !registerEmail.trim()) return;
     setLoading(true);
-    const newMerchant = await createMerchant({
-      name: registerName.trim(),
-      email: registerEmail.trim(),
-    });
-    addMerchant(newMerchant);
-    setMerchantSession(newMerchant);
+    try {
+      const res = await fetch("/api/merchants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: registerName.trim(), email: registerEmail.trim() }),
+      });
+      const newMerchant: ApiMerchant = await res.json();
+      mutate(); // Refresh merchants list
+      setMerchantSession({
+        id: newMerchant.id,
+        name: newMerchant.name,
+        email: newMerchant.email,
+        shopify_configured: newMerchant.shopify_configured,
+      });
+    } catch {
+      // handle error silently
+    }
     setLoading(false);
   };
 
@@ -66,9 +79,7 @@ export default function MerchantPage() {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent">
             <Building2 className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">
-            Merchant Portal
-          </h1>
+          <h1 className="text-2xl font-bold text-foreground">Merchant Portal</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Login to manage your products or register a new account
           </p>
@@ -105,10 +116,7 @@ export default function MerchantPage() {
             {activeTab === "login" ? (
               <div className="flex flex-col gap-4">
                 <div>
-                  <label
-                    htmlFor="merchant-select"
-                    className="mb-1.5 block text-sm font-medium text-foreground"
-                  >
+                  <label htmlFor="merchant-select" className="mb-1.5 block text-sm font-medium text-foreground">
                     Select Merchant
                   </label>
                   <select
@@ -118,7 +126,7 @@ export default function MerchantPage() {
                     className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="">Choose a merchant...</option>
-                    {allMerchants.map((m) => (
+                    {(merchants ?? []).map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.name} ({m.email})
                       </option>
@@ -136,10 +144,7 @@ export default function MerchantPage() {
             ) : (
               <div className="flex flex-col gap-4">
                 <div>
-                  <label
-                    htmlFor="business-name"
-                    className="mb-1.5 block text-sm font-medium text-foreground"
-                  >
+                  <label htmlFor="business-name" className="mb-1.5 block text-sm font-medium text-foreground">
                     Business Name
                   </label>
                   <input
@@ -152,10 +157,7 @@ export default function MerchantPage() {
                   />
                 </div>
                 <div>
-                  <label
-                    htmlFor="business-email"
-                    className="mb-1.5 block text-sm font-medium text-foreground"
-                  >
+                  <label htmlFor="business-email" className="mb-1.5 block text-sm font-medium text-foreground">
                     Email
                   </label>
                   <input
@@ -169,9 +171,7 @@ export default function MerchantPage() {
                 </div>
                 <button
                   onClick={handleRegister}
-                  disabled={
-                    loading || !registerName.trim() || !registerEmail.trim()
-                  }
+                  disabled={loading || !registerName.trim() || !registerEmail.trim()}
                   className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
                 >
                   {loading ? (
