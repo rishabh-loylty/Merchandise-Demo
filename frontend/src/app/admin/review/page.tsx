@@ -1,76 +1,45 @@
 "use client";
 
-import { useGlobal } from "@/context/global-context";
-import {
-  MASTER_BRANDS,
-  MASTER_CATEGORIES,
-  PRODUCTS,
-  approveProduct,
-  rejectProduct,
-  type MasterCategory,
-  type Product,
-} from "@/lib/mock-data";
+import { fetcher } from "@/lib/fetcher";
+import type { ApiBrand, ApiCategory, ApiProduct } from "@/lib/types";
 import {
   Check,
   ChevronDown,
-  ChevronRight,
   ClipboardCheck,
   Search,
   Shield,
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useState } from "react";
+import useSWR from "swr";
 
 export default function AdminReviewPage() {
-  const { products: contextProducts, updateProductStatus, removeProduct } =
-    useGlobal();
-
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const { data: pendingProducts, isLoading, mutate } = useSWR<ApiProduct[]>(
+    "/api/admin/review",
+    fetcher
+  );
+  const [selectedProduct, setSelectedProduct] = useState<ApiProduct | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
 
-  // Get all pending products from both initial data and context
-  const pendingProducts = useMemo(() => {
-    const initialPending = PRODUCTS.filter(
-      (p) => p.status === "PENDING_REVIEW"
-    );
-    const contextPending = contextProducts.filter(
-      (p) => p.status === "PENDING_REVIEW"
-    );
-    const all = [...initialPending, ...contextPending];
-    return all.filter((p, i, arr) => arr.findIndex((x) => x.id === p.id) === i);
-  }, [contextProducts]);
+  const products = pendingProducts ?? [];
 
-  const [localPending, setLocalPending] = useState<Product[]>(pendingProducts);
-
-  useEffect(() => {
-    setLocalPending(pendingProducts);
-  }, [pendingProducts]);
-
-  const handleReview = (product: Product) => {
+  const handleReview = (product: ApiProduct) => {
     setSelectedProduct(product);
     setReviewOpen(true);
   };
 
-  const handleApprove = useCallback(
-    (productId: string) => {
-      setLocalPending((prev) => prev.filter((p) => p.id !== productId));
-      updateProductStatus(productId, "LIVE");
-      setReviewOpen(false);
-      setSelectedProduct(null);
-    },
-    [updateProductStatus]
-  );
+  const handleApprove = async (productId: number) => {
+    setReviewOpen(false);
+    setSelectedProduct(null);
+    mutate(); // Refresh from API
+  };
 
-  const handleReject = useCallback(
-    (productId: string) => {
-      setLocalPending((prev) => prev.filter((p) => p.id !== productId));
-      removeProduct(productId);
-      setReviewOpen(false);
-      setSelectedProduct(null);
-    },
-    [removeProduct]
-  );
+  const handleReject = async (productId: number) => {
+    setReviewOpen(false);
+    setSelectedProduct(null);
+    mutate(); // Refresh from API
+  };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -89,82 +58,53 @@ export default function AdminReviewPage() {
         <div className="flex items-center gap-2 rounded-lg border border-border bg-warning/5 px-4 py-2.5">
           <ClipboardCheck className="h-5 w-5 text-warning" />
           <span className="text-sm font-medium text-foreground">
-            {localPending.length} item{localPending.length !== 1 ? "s" : ""}{" "}
-            pending review
+            {products.length} item{products.length !== 1 ? "s" : ""} pending review
           </span>
         </div>
       </div>
 
       {/* Review Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm">
-        {localPending.length === 0 ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          </div>
+        ) : products.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Check className="mb-4 h-12 w-12 text-success" />
-            <h3 className="mb-2 text-lg font-semibold text-foreground">
-              All caught up!
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              No products pending review
-            </p>
+            <h3 className="mb-2 text-lg font-semibold text-foreground">All caught up!</h3>
+            <p className="text-sm text-muted-foreground">No products pending review</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Product
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Vendor
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    SKU
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Price
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Action
-                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Vendor</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">SKU</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Price</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
+                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {localPending.map((product) => (
+                {products.map((product) => (
                   <tr key={product.id} className="hover:bg-muted/30">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-                          <Image
-                            src={product.image}
-                            alt={product.title}
-                            fill
-                            className="object-cover"
-                            sizes="40px"
-                          />
+                          <Image src={product.image_url} alt={product.title} fill className="object-cover" sizes="40px" />
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-foreground">
-                            {product.title}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {product.brand}
-                          </p>
+                          <p className="text-sm font-medium text-foreground">{product.title}</p>
+                          <p className="text-xs text-muted-foreground">{product.brand_name}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {product.vendor}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {product.sku}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">
-                      INR {product.basePrice.toLocaleString()}
-                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">{product.raw_vendor ?? product.merchant_name}</td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">{product.sku}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-foreground">INR {product.base_price.toLocaleString()}</td>
                     <td className="px-6 py-4">
                       <span className="inline-flex items-center rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">
                         Pending Review
@@ -186,7 +126,7 @@ export default function AdminReviewPage() {
         )}
       </div>
 
-      {/* Review Modal / Sheet */}
+      {/* Review Modal */}
       {reviewOpen && selectedProduct && (
         <ReviewModal
           product={selectedProduct}
@@ -208,43 +148,65 @@ function ReviewModal({
   onApprove,
   onReject,
 }: {
-  product: Product;
+  product: ApiProduct;
   onClose: () => void;
-  onApprove: (id: string) => void;
-  onReject: (id: string) => void;
+  onApprove: (id: number) => void;
+  onReject: (id: number) => void;
 }) {
   const [editTitle, setEditTitle] = useState(product.title);
-  const [selectedBrand, setSelectedBrand] = useState(product.brand);
-  const [selectedCategory, setSelectedCategory] = useState(product.category);
-  const [selectedSubCategory, setSelectedSubCategory] = useState("");
+  const [selectedBrandId, setSelectedBrandId] = useState(product.brand_id ?? 0);
+  const [selectedBrandName, setSelectedBrandName] = useState(product.brand_name);
+  const [selectedCategorySlug, setSelectedCategorySlug] = useState(product.category_slug ?? "");
+  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState<number | null>(null);
   const [brandSearchOpen, setBrandSearchOpen] = useState(false);
   const [brandSearch, setBrandSearch] = useState("");
   const [approving, setApproving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
 
-  const filteredBrands = MASTER_BRANDS.filter((b) =>
+  const { data: brands } = useSWR<ApiBrand[]>("/api/brands", fetcher);
+  const { data: categories } = useSWR<ApiCategory[]>("/api/categories", fetcher);
+
+  const topCategories = categories?.filter((c) => c.parent_id === null) ?? [];
+  const allBrands = brands ?? [];
+
+  const filteredBrands = allBrands.filter((b) =>
     b.name.toLowerCase().includes(brandSearch.toLowerCase())
   );
 
-  const selectedCategoryObj = MASTER_CATEGORIES.find(
-    (c) => c.id === selectedCategory
-  );
+  const selectedCategoryObj = topCategories.find((c) => c.slug === selectedCategorySlug);
 
   const handleApprove = async () => {
     setApproving(true);
-    await approveProduct(product.id, {
-      title: editTitle,
-      brand: selectedBrand,
-      category: selectedSubCategory || selectedCategory,
-    });
-    onApprove(product.id);
+    try {
+      await fetch(`/api/admin/review/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "approve",
+          title: editTitle,
+          brand_id: selectedBrandId,
+          category_id: selectedSubCategoryId ?? selectedCategoryObj?.id,
+        }),
+      });
+      onApprove(product.id);
+    } catch {
+      // handle error
+    }
     setApproving(false);
   };
 
   const handleReject = async () => {
     setRejecting(true);
-    await rejectProduct(product.id);
-    onReject(product.id);
+    try {
+      await fetch(`/api/admin/review/${product.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject" }),
+      });
+      onReject(product.id);
+    } catch {
+      // handle error
+    }
     setRejecting(false);
   };
 
@@ -253,9 +215,7 @@ function ReviewModal({
       <div className="flex h-full w-full max-w-2xl flex-col bg-card shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-bold text-foreground">
-            Review Product
-          </h2>
+          <h2 className="text-lg font-bold text-foreground">Review Product</h2>
           <button
             onClick={onClose}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -269,68 +229,38 @@ function ReviewModal({
           {/* Product Preview */}
           <div className="mb-6 flex items-start gap-4">
             <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-              <Image
-                src={product.image}
-                alt={product.title}
-                fill
-                className="object-cover"
-                sizes="80px"
-              />
+              <Image src={product.image_url} alt={product.title} fill className="object-cover" sizes="80px" />
             </div>
             <div>
-              <p className="text-sm font-medium text-foreground">
-                {product.title}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                SKU: {product.sku}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                INR {product.basePrice.toLocaleString()}
-              </p>
+              <p className="text-sm font-medium text-foreground">{product.title}</p>
+              <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
+              <p className="text-xs text-muted-foreground">INR {product.base_price.toLocaleString()}</p>
             </div>
           </div>
 
           {/* Original Data (Read-only) */}
           <div className="mb-6">
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <span className="flex h-5 w-5 items-center justify-center rounded bg-muted text-xs font-bold text-muted-foreground">
-                1
-              </span>
+              <span className="flex h-5 w-5 items-center justify-center rounded bg-muted text-xs font-bold text-muted-foreground">1</span>
               Original Data from Shopify
             </h3>
             <div className="rounded-lg border border-border bg-muted/50 p-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Title
-                  </p>
-                  <p className="mt-1 text-sm text-foreground">
-                    {product.title}
-                  </p>
+                  <p className="text-xs font-medium text-muted-foreground">Title</p>
+                  <p className="mt-1 text-sm text-foreground">{product.raw_title ?? product.title}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Vendor
-                  </p>
-                  <p className="mt-1 text-sm text-foreground">
-                    {product.vendor}
-                  </p>
+                  <p className="text-xs font-medium text-muted-foreground">Vendor</p>
+                  <p className="mt-1 text-sm text-foreground">{product.raw_vendor ?? product.merchant_name}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Brand
-                  </p>
-                  <p className="mt-1 text-sm text-foreground">
-                    {product.brand}
-                  </p>
+                  <p className="text-xs font-medium text-muted-foreground">Brand</p>
+                  <p className="mt-1 text-sm text-foreground">{product.brand_name}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Category
-                  </p>
-                  <p className="mt-1 text-sm capitalize text-foreground">
-                    {product.category}
-                  </p>
+                  <p className="text-xs font-medium text-muted-foreground">Category</p>
+                  <p className="mt-1 text-sm capitalize text-foreground">{product.raw_product_type ?? product.category_name}</p>
                 </div>
               </div>
             </div>
@@ -339,20 +269,13 @@ function ReviewModal({
           {/* Master Catalog Data (Editable) */}
           <div>
             <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <span className="flex h-5 w-5 items-center justify-center rounded bg-primary text-xs font-bold text-primary-foreground">
-                2
-              </span>
+              <span className="flex h-5 w-5 items-center justify-center rounded bg-primary text-xs font-bold text-primary-foreground">2</span>
               Master Catalog Data
             </h3>
             <div className="flex flex-col gap-4 rounded-lg border border-primary/20 bg-accent/30 p-4">
               {/* Title */}
               <div>
-                <label
-                  htmlFor="edit-title"
-                  className="mb-1.5 block text-xs font-medium text-foreground"
-                >
-                  Title
-                </label>
+                <label htmlFor="edit-title" className="mb-1.5 block text-xs font-medium text-foreground">Title</label>
                 <input
                   id="edit-title"
                   type="text"
@@ -362,17 +285,15 @@ function ReviewModal({
                 />
               </div>
 
-              {/* Brand Selector (Combobox) */}
+              {/* Brand Selector */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-foreground">
-                  Brand Mapping
-                </label>
+                <label className="mb-1.5 block text-xs font-medium text-foreground">Brand Mapping</label>
                 <div className="relative">
                   <button
                     onClick={() => setBrandSearchOpen(!brandSearchOpen)}
                     className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-muted"
                   >
-                    <span>{selectedBrand || "Select brand..."}</span>
+                    <span>{selectedBrandName || "Select brand..."}</span>
                     <ChevronDown className="h-4 w-4 text-muted-foreground" />
                   </button>
                   {brandSearchOpen && (
@@ -395,83 +316,66 @@ function ReviewModal({
                           <button
                             key={brand.id}
                             onClick={() => {
-                              setSelectedBrand(brand.name);
+                              setSelectedBrandId(brand.id);
+                              setSelectedBrandName(brand.name);
                               setBrandSearchOpen(false);
                               setBrandSearch("");
                             }}
                             className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted ${
-                              selectedBrand === brand.name
-                                ? "bg-accent font-medium text-accent-foreground"
-                                : "text-foreground"
+                              selectedBrandId === brand.id ? "bg-accent font-medium text-accent-foreground" : "text-foreground"
                             }`}
                           >
                             {brand.name}
-                            {selectedBrand === brand.name && (
-                              <Check className="h-4 w-4 text-primary" />
-                            )}
+                            {selectedBrandId === brand.id && <Check className="h-4 w-4 text-primary" />}
                           </button>
                         ))}
                         {filteredBrands.length === 0 && (
-                          <p className="px-3 py-2 text-sm text-muted-foreground">
-                            No brands found
-                          </p>
+                          <p className="px-3 py-2 text-sm text-muted-foreground">No brands found</p>
                         )}
                       </div>
                     </div>
                   )}
                 </div>
-                {product.vendor !== selectedBrand && (
+                {product.raw_vendor && product.raw_vendor !== selectedBrandName && (
                   <p className="mt-1 text-xs text-primary">
-                    Mapping &quot;{product.vendor}&quot; to &quot;
-                    {selectedBrand}&quot;
+                    Mapping &quot;{product.raw_vendor}&quot; to &quot;{selectedBrandName}&quot;
                   </p>
                 )}
               </div>
 
-              {/* Category Selector (Tree) */}
+              {/* Category Selector */}
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-foreground">
-                  Category
-                </label>
+                <label className="mb-1.5 block text-xs font-medium text-foreground">Category</label>
                 <div className="flex flex-col gap-2">
                   <select
-                    value={selectedCategory}
+                    value={selectedCategorySlug}
                     onChange={(e) => {
-                      setSelectedCategory(e.target.value);
-                      setSelectedSubCategory("");
+                      setSelectedCategorySlug(e.target.value);
+                      setSelectedSubCategoryId(null);
                     }}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="">Select category...</option>
-                    {MASTER_CATEGORIES.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </option>
+                    {topCategories.map((cat) => (
+                      <option key={cat.id} value={cat.slug}>{cat.name}</option>
                     ))}
                   </select>
 
-                  {selectedCategoryObj?.children &&
-                    selectedCategoryObj.children.length > 0 && (
-                      <div className="ml-4">
-                        <label className="mb-1 block text-xs text-muted-foreground">
-                          Sub-category
-                        </label>
-                        <select
-                          value={selectedSubCategory}
-                          onChange={(e) =>
-                            setSelectedSubCategory(e.target.value)
-                          }
-                          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                        >
-                          <option value="">Select sub-category...</option>
-                          {selectedCategoryObj.children.map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
+                  {selectedCategoryObj?.children && selectedCategoryObj.children.length > 0 && (
+                    <div className="ml-4">
+                      <label className="mb-1 block text-xs text-muted-foreground">Sub-category</label>
+                      <select
+                        value={selectedSubCategoryId ?? ""}
+                        onChange={(e) => setSelectedSubCategoryId(e.target.value ? Number(e.target.value) : null)}
+                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                      >
+                        <option value="">Select sub-category...</option>
+                        {selectedCategoryObj.children.map((sub) => (
+                          <option key={sub.id} value={sub.id}>{sub.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -502,7 +406,7 @@ function ReviewModal({
             ) : (
               <Check className="h-4 w-4" />
             )}
-            Approve & Publish
+            Approve
           </button>
         </div>
       </div>

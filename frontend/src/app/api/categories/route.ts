@@ -9,7 +9,7 @@ export async function GET() {
       SELECT id, parent_id, name, slug, icon, path, is_active
       FROM categories
       WHERE is_active = 1
-      ORDER BY parent_id NULLS FIRST, name
+      ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, parent_id, name
     `).all() as Array<{
       id: number;
       parent_id: number | null;

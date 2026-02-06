@@ -1,7 +1,6 @@
 "use client";
 
 import { useGlobal } from "@/context/global-context";
-import { saveShopifyConfig } from "@/lib/mock-data";
 import { Link2, ShoppingBag } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -19,12 +18,12 @@ export default function OnboardingPage() {
       router.push("/merchant");
       return;
     }
-    if (merchantSession.shopifyConfigured) {
+    if (merchantSession.shopify_configured) {
       router.push("/merchant/dashboard");
     }
   }, [merchantSession, router]);
 
-  if (!merchantSession || merchantSession.shopifyConfigured) {
+  if (!merchantSession || merchantSession.shopify_configured) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -39,14 +38,22 @@ export default function OnboardingPage() {
     }
     setError("");
     setLoading(true);
-    const success = await saveShopifyConfig({
-      storeUrl: storeUrl.trim(),
-      accessToken: accessToken.trim(),
-    });
-    if (success) {
-      updateMerchantSession({ shopifyConfigured: true });
-      router.push("/merchant/dashboard");
-    } else {
+    try {
+      const res = await fetch(`/api/merchants/${merchantSession.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shopify_configured: true,
+          source_config: { store_url: storeUrl.trim(), access_token: accessToken.trim() },
+        }),
+      });
+      if (res.ok) {
+        updateMerchantSession({ shopify_configured: 1 });
+        router.push("/merchant/dashboard");
+      } else {
+        setError("Failed to connect. Please try again.");
+      }
+    } catch {
       setError("Failed to connect. Please try again.");
     }
     setLoading(false);
@@ -59,9 +66,7 @@ export default function OnboardingPage() {
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-accent">
             <ShoppingBag className="h-8 w-8 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">
-            Connect Your Shopify Store
-          </h1>
+          <h1 className="text-2xl font-bold text-foreground">Connect Your Shopify Store</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Link your Shopify store to start listing products on Rewardify
           </p>
@@ -71,21 +76,14 @@ export default function OnboardingPage() {
           <div className="mb-6 flex items-center gap-3 rounded-lg bg-accent/50 p-3">
             <Link2 className="h-5 w-5 text-primary" />
             <div>
-              <p className="text-sm font-medium text-foreground">
-                Logged in as {merchantSession.name}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {merchantSession.email}
-              </p>
+              <p className="text-sm font-medium text-foreground">Logged in as {merchantSession.name}</p>
+              <p className="text-xs text-muted-foreground">{merchantSession.email}</p>
             </div>
           </div>
 
           <div className="flex flex-col gap-4">
             <div>
-              <label
-                htmlFor="store-url"
-                className="mb-1.5 block text-sm font-medium text-foreground"
-              >
+              <label htmlFor="store-url" className="mb-1.5 block text-sm font-medium text-foreground">
                 Shopify Store URL
               </label>
               <input
@@ -98,10 +96,7 @@ export default function OnboardingPage() {
               />
             </div>
             <div>
-              <label
-                htmlFor="access-token"
-                className="mb-1.5 block text-sm font-medium text-foreground"
-              >
+              <label htmlFor="access-token" className="mb-1.5 block text-sm font-medium text-foreground">
                 Access Token
               </label>
               <input
@@ -114,9 +109,7 @@ export default function OnboardingPage() {
               />
             </div>
 
-            {error && (
-              <p className="text-sm text-destructive">{error}</p>
-            )}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             <button
               onClick={handleConnect}

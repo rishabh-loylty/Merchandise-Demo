@@ -8,6 +8,10 @@ export async function PATCH(
 ) {
   try {
     const { productId } = await params;
+    const id = Number(productId);
+    if (Number.isNaN(id)) {
+      return NextResponse.json({ error: "Invalid product id" }, { status: 400 });
+    }
     const body = await request.json();
     const { action, title, brand_id, category_id } = body;
 
@@ -16,22 +20,22 @@ export async function PATCH(
     if (action === "approve") {
       // Update product master data if provided
       if (title) {
-        db.prepare("UPDATE products SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, productId);
+        db.prepare("UPDATE products SET title = ?, updated_at = datetime('now') WHERE id = ?").run(title, id);
       }
       if (brand_id) {
-        db.prepare("UPDATE products SET brand_id = ?, updated_at = datetime('now') WHERE id = ?").run(brand_id, productId);
+        db.prepare("UPDATE products SET brand_id = ?, updated_at = datetime('now') WHERE id = ?").run(brand_id, id);
       }
       if (category_id) {
         // Update product_categories
-        db.prepare("DELETE FROM product_categories WHERE product_id = ?").run(productId);
+        db.prepare("DELETE FROM product_categories WHERE product_id = ?").run(id);
         // Get top-level category for the selected category
         const cat = db.prepare("SELECT id, parent_id FROM categories WHERE id = ?").get(category_id) as { id: number; parent_id: number | null } | undefined;
         if (cat) {
           const topCatId = cat.parent_id ?? cat.id;
-          db.prepare("INSERT INTO product_categories (product_id, category_id) VALUES (?, ?)").run(productId, topCatId);
+          db.prepare("INSERT INTO product_categories (product_id, category_id) VALUES (?, ?)").run(id, topCatId);
           if (cat.parent_id) {
             // Also link sub-category
-            db.prepare("INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)").run(productId, cat.id);
+            db.prepare("INSERT OR IGNORE INTO product_categories (product_id, category_id) VALUES (?, ?)").run(id, cat.id);
           }
         }
       }
@@ -40,7 +44,7 @@ export async function PATCH(
       db.prepare(`
         UPDATE merchant_offers SET offer_status = 'LIVE', updated_at = datetime('now')
         WHERE variant_id IN (SELECT id FROM variants WHERE product_id = ?)
-      `).run(productId);
+      `).run(id);
 
       // Update staging product status
       db.prepare(`
@@ -50,7 +54,7 @@ export async function PATCH(
           JOIN variants v ON mo.variant_id = v.id
           WHERE v.product_id = ?
         ) AND status = 'NEEDS_REVIEW'
-      `).run(productId);
+      `).run(id);
 
       return NextResponse.json({ success: true, action: "approved" });
     }
@@ -60,7 +64,7 @@ export async function PATCH(
       db.prepare(`
         UPDATE merchant_offers SET is_active = 0, offer_status = 'PENDING_REVIEW', updated_at = datetime('now')
         WHERE variant_id IN (SELECT id FROM variants WHERE product_id = ?)
-      `).run(productId);
+      `).run(id);
 
       // Update staging product status
       db.prepare(`
@@ -70,10 +74,10 @@ export async function PATCH(
           JOIN variants v ON mo.variant_id = v.id
           WHERE v.product_id = ?
         ) AND status = 'NEEDS_REVIEW'
-      `).run(body.rejection_reason || "Rejected by admin", productId);
+      `).run(body.rejection_reason || "Rejected by admin", id);
 
       // Archive the product
-      db.prepare("UPDATE products SET status = 'ARCHIVED', updated_at = datetime('now') WHERE id = ?").run(productId);
+      db.prepare("UPDATE products SET status = 'ARCHIVED', updated_at = datetime('now') WHERE id = ?").run(id);
 
       return NextResponse.json({ success: true, action: "rejected" });
     }

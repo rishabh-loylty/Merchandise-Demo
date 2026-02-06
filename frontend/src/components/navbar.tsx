@@ -1,7 +1,7 @@
 "use client";
 
-import { useGlobal } from "@/context/global-context";
-import { BANKS } from "@/lib/mock-data";
+import { useGlobal, type PartnerBank } from "@/context/global-context";
+import { fetcher } from "@/lib/fetcher";
 import {
   ChevronDown,
   CreditCard,
@@ -13,7 +13,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import useSWR from "swr";
 
 export function Navbar() {
   const {
@@ -26,9 +27,20 @@ export function Navbar() {
   } = useGlobal();
   const router = useRouter();
 
+  // Fetch partners (banks) from API
+  const { data: partners } = useSWR<PartnerBank[]>("/api/partners", fetcher);
+
+  // Auto-select first bank when data loads
+  useEffect(() => {
+    if (partners && partners.length > 0 && !selectedBank) {
+      setSelectedBank(partners[0]!);
+    }
+  }, [partners, selectedBank, setSelectedBank]);
+
   if (currentRole === "CUSTOMER") {
     return (
       <CustomerNavbar
+        banks={partners ?? []}
         selectedBank={selectedBank}
         onBankChange={setSelectedBank}
         onLoginMerchant={() => {
@@ -57,13 +69,15 @@ export function Navbar() {
 }
 
 function CustomerNavbar({
+  banks,
   selectedBank,
   onBankChange,
   onLoginMerchant,
   onLoginAdmin,
 }: {
-  selectedBank: { id: string; name: string; pointRatio: number };
-  onBankChange: (bank: (typeof BANKS)[number]) => void;
+  banks: PartnerBank[];
+  selectedBank: PartnerBank | null;
+  onBankChange: (bank: PartnerBank) => void;
   onLoginMerchant: () => void;
   onLoginAdmin: () => void;
 }) {
@@ -114,12 +128,12 @@ function CustomerNavbar({
               className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             >
               <CreditCard className="h-4 w-4 text-primary" />
-              <span>{selectedBank.name}</span>
+              <span>{selectedBank?.name ?? "Loading..."}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </button>
             {bankOpen && (
               <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-border bg-card p-1 shadow-lg">
-                {BANKS.map((bank) => (
+                {banks.map((bank) => (
                   <button
                     key={bank.id}
                     onClick={() => {
@@ -127,14 +141,14 @@ function CustomerNavbar({
                       setBankOpen(false);
                     }}
                     className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted ${
-                      selectedBank.id === bank.id
+                      selectedBank?.id === bank.id
                         ? "bg-accent font-medium text-accent-foreground"
                         : "text-foreground"
                     }`}
                   >
                     <span>{bank.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      1pt = {bank.pointRatio} INR
+                      1pt = {bank.points_to_currency_rate} INR
                     </span>
                   </button>
                 ))}

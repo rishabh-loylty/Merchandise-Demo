@@ -10,6 +10,10 @@ export async function GET(
     const { productId } = await params;
     const db = getDb();
 
+    const id = Number(productId);
+    if (Number.isNaN(id)) {
+      return NextResponse.json({ error: "Invalid product id" }, { status: 400 });
+    }
     const product = db.prepare(`
       SELECT 
         p.id, p.title, p.slug, p.description, p.image_url, p.base_price,
@@ -27,7 +31,7 @@ export async function GET(
       LEFT JOIN product_categories pc ON pc.product_id = p.id
       LEFT JOIN categories c ON pc.category_id = c.id AND c.parent_id IS NULL
       WHERE p.id = ?
-    `).get(productId);
+    `).get(id);
 
     if (!product) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
