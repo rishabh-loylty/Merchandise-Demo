@@ -264,15 +264,19 @@ function seedDb(db: Database.Database) {
     insertCurrency.run("INR", "Indian Rupee", 2, "₹");
     insertCurrency.run("USD", "US Dollar", 2, "$");
 
-    // Loyalty Partners (Banks)
-    insertPartner.run("SBI", 1, JSON.stringify({ brand_color: "#00457c" }));     // id=1
-    insertPartner.run("HDFC", 1, JSON.stringify({ brand_color: "#004c8f" }));    // id=2
-    insertPartner.run("Axis", 1, JSON.stringify({ brand_color: "#97144d" }));    // id=3
+    // Loyalty Partners (Banks) – initial set so /api/partners and bank selector work
+    insertPartner.run("SBI", 1, JSON.stringify({ brand_color: "#00457c" }));           // id=1
+    insertPartner.run("HDFC Bank", 1, JSON.stringify({ brand_color: "#004c8f" }));     // id=2
+    insertPartner.run("Axis Bank", 1, JSON.stringify({ brand_color: "#97144d" }));      // id=3
+    insertPartner.run("Yes Bank", 1, JSON.stringify({ brand_color: "#132054" }));       // id=4
+    insertPartner.run("IndusInd Bank", 1, JSON.stringify({ brand_color: "#00529b" })); // id=5
 
-    // Point Conversion Rules
-    insertRule.run(1, "INR", 0.25);  // SBI: 1pt = 0.25 INR
-    insertRule.run(2, "INR", 0.50);  // HDFC: 1pt = 0.50 INR
-    insertRule.run(3, "INR", 0.35);  // Axis: 1pt = 0.35 INR
+    // Point Conversion Rules (1 point = X INR)
+    insertRule.run(1, "INR", 0.25);  // SBI
+    insertRule.run(2, "INR", 0.5);   // HDFC Bank
+    insertRule.run(3, "INR", 0.35);  // Axis Bank
+    insertRule.run(4, "INR", 0.3);   // Yes Bank
+    insertRule.run(5, "INR", 0.28);  // IndusInd Bank
 
     // Merchants
     insertMerchant.run("Seller A", "seller.a@example.com", "SHOPIFY", JSON.stringify({ store_url: "seller-a.myshopify.com" }), 1); // id=1
@@ -417,21 +421,21 @@ function seedDb(db: Database.Database) {
     // Products 4-6, 8 belong to merchant-2 (Seller B, id=2)
     // Products 10-12 are PENDING_REVIEW
 
-    // LIVE offers
-    insertOffer.run(1, 1, "INR", 249900, 237405, 50, "LIVE", "PRE-SC-5L");        // prod 1
-    insertOffer.run(1, 2, "INR", 499900, 474905, 100, "LIVE", "SAM-GBP-01");      // prod 2
-    insertOffer.run(1, 3, "INR", 799900, 759905, 75, "LIVE", "NIK-AM270");        // prod 3
-    insertOffer.run(2, 4, "INR", 549900, 522405, 40, "LIVE", "PHI-AF-HD9200");    // prod 4
-    insertOffer.run(2, 5, "INR", 1999900, 1899905, 30, "LIVE", "SON-WH1000XM5"); // prod 5
-    insertOffer.run(2, 6, "INR", 1199900, 1139905, 60, "LIVE", "ADI-UB22");      // prod 6
-    insertOffer.run(1, 7, "INR", 2499900, 2374905, 20, "LIVE", "BOS-WM-7KG");    // prod 7
-    insertOffer.run(2, 8, "INR", 8999900, 8549905, 15, "LIVE", "LG-OLED55");     // prod 8
-    insertOffer.run(1, 9, "INR", 649900, 617405, 80, "LIVE", "PUM-RSX");          // prod 9
+    // LIVE offers (merchant_id, variant_id, cached_price_minor, cached_settlement_price_minor, current_stock, offer_status, merchant_sku)
+    insertOffer.run(1, 1, 249900, 237405, 50, "LIVE", "PRE-SC-5L");        // prod 1
+    insertOffer.run(1, 2, 499900, 474905, 100, "LIVE", "SAM-GBP-01");     // prod 2
+    insertOffer.run(1, 3, 799900, 759905, 75, "LIVE", "NIK-AM270");       // prod 3
+    insertOffer.run(2, 4, 549900, 522405, 40, "LIVE", "PHI-AF-HD9200");   // prod 4
+    insertOffer.run(2, 5, 1999900, 1899905, 30, "LIVE", "SON-WH1000XM5");  // prod 5
+    insertOffer.run(2, 6, 1199900, 1139905, 60, "LIVE", "ADI-UB22");      // prod 6
+    insertOffer.run(1, 7, 2499900, 2374905, 20, "LIVE", "BOS-WM-7KG");     // prod 7
+    insertOffer.run(2, 8, 8999900, 8549905, 15, "LIVE", "LG-OLED55");      // prod 8
+    insertOffer.run(1, 9, 649900, 617405, 80, "LIVE", "PUM-RSX");          // prod 9
 
     // PENDING_REVIEW offers
-    insertOffer.run(1, 10, "INR", 329900, 313405, 45, "PENDING_REVIEW", "PRE-IRIS-750"); // prod 10
-    insertOffer.run(2, 11, "INR", 299900, 284905, 200, "PENDING_REVIEW", "SAM-SSD-256"); // prod 11
-    insertOffer.run(2, 12, "INR", 549900, 522405, 55, "PENDING_REVIEW", "REE-CL-LTH");  // prod 12
+    insertOffer.run(1, 10, 329900, 313405, 45, "PENDING_REVIEW", "PRE-IRIS-750");  // prod 10
+    insertOffer.run(2, 11, 299900, 284905, 200, "PENDING_REVIEW", "SAM-SSD-256");  // prod 11
+    insertOffer.run(2, 12, 549900, 522405, 55, "PENDING_REVIEW", "REE-CL-LTH");   // prod 12
 
     // Staging products for pending items
     const insertStaging = db.prepare("INSERT INTO staging_products (merchant_id, external_product_id, raw_title, raw_vendor, raw_product_type, status) VALUES (?, ?, ?, ?, ?, ?)");
