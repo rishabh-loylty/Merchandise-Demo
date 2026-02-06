@@ -34,6 +34,8 @@ export interface ApiProduct {
     internal_sku: string;
     attributes?: Record<string, unknown> | null;
     is_active?: boolean;
+    stock: number;
+    price: number;
   }>;
   offers?: Array<{
     id: number;
@@ -44,6 +46,7 @@ export interface ApiProduct {
     current_stock: number;
     merchant_name: string;
   }>;
+  images?: Array<string>;
 }
 
 export interface ApiCategory {

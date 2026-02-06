@@ -54,11 +54,12 @@ export default function ProductDetailPage() {
 
   // --- Logic 1: Initialize Selection (Smart Auto-Select) ---
   useEffect(() => {
-    if (product && variants.length > 0) {
+    const firstVariant = variants[0];
+    if (product && firstVariant) {
       // 1. Find the first variant that has stock > 0
       const inStockVariant = variants.find(v => v.stock > 0);
       // 2. If all are OOS, just pick the first one
-      const targetVariantId = inStockVariant ? inStockVariant.id : variants[0].id;
+      const targetVariantId = inStockVariant ? inStockVariant.id : firstVariant.id;
       
       setSelectedVariantId(targetVariantId);
       setQuantity(1);
@@ -79,7 +80,7 @@ export default function ProductDetailPage() {
     if (filteredOffers.length > 0) {
       // Default to the first offer (usually best price) or the one with stock
       const inStockOffer = filteredOffers.find(o => o.current_stock > 0);
-      setSelectedOfferId(inStockOffer ? inStockOffer.id : filteredOffers[0].id);
+      setSelectedOfferId(inStockOffer ? inStockOffer.id : filteredOffers?.[0]?.id ?? null);
     } else {
       setSelectedOfferId(null);
     }
