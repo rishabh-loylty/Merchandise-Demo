@@ -5,10 +5,10 @@ import { NextResponse } from "next/server";
 export async function GET() {
   try {
     const db = getDb();
-    const categories = db.prepare(`
+    const categories = await db.prepare(`
       SELECT id, parent_id, name, slug, icon, path, is_active
       FROM categories
-      WHERE is_active = 1
+      WHERE is_active = true
       ORDER BY CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END, parent_id, name
     `).all() as Array<{
       id: number;
@@ -17,7 +17,7 @@ export async function GET() {
       slug: string;
       icon: string | null;
       path: string | null;
-      is_active: number;
+      is_active: boolean;
     }>;
 
     // Build hierarchy

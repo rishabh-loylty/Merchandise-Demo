@@ -21,7 +21,7 @@ export interface MerchantSession {
   id: number;
   name: string;
   email: string;
-  shopify_configured: number;
+  shopify_configured: boolean;
 }
 
 interface GlobalState {

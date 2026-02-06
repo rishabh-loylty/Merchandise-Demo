@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 // PATCH /api/merchants/:merchantId - Update merchant (e.g. connect shopify)
 export async function PATCH(
@@ -16,10 +17,10 @@ export async function PATCH(
 
     if (body.shopify_configured !== undefined) {
       sets.push("shopify_configured = ?");
-      values.push(body.shopify_configured ? 1 : 0);
+      values.push(Boolean(body.shopify_configured));
     }
     if (body.source_config !== undefined) {
-      sets.push("source_config = ?");
+      sets.push("source_config = ?::jsonb");
       values.push(JSON.stringify(body.source_config));
     }
     if (body.name !== undefined) {
@@ -31,12 +32,12 @@ export async function PATCH(
       return NextResponse.json({ error: "No fields to update" }, { status: 400 });
     }
 
-    sets.push("updated_at = datetime('now')");
+    sets.push("updated_at = NOW()");
     values.push(merchantId);
 
-    db.prepare(`UPDATE merchants SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    await db.prepare(`UPDATE merchants SET ${sets.join(", ")} WHERE id = ?`).run(...values);
 
-    const merchant = db.prepare(
+    const merchant = await db.prepare(
       "SELECT id, name, email, source_type, shopify_configured, is_active, created_at FROM merchants WHERE id = ?"
     ).get(merchantId);
 

@@ -29,6 +29,21 @@ export interface ApiProduct {
   raw_product_type?: string;
   staging_id?: number;
   offer_id?: number;
+  variants?: Array<{
+    id: number;
+    internal_sku: string;
+    attributes?: Record<string, unknown> | null;
+    is_active?: boolean;
+  }>;
+  offers?: Array<{
+    id: number;
+    merchant_id: number;
+    variant_id: number;
+    offer_status: string;
+    cached_price_minor: number;
+    current_stock: number;
+    merchant_name: string;
+  }>;
 }
 
 export interface ApiCategory {
@@ -38,7 +53,7 @@ export interface ApiCategory {
   slug: string;
   icon: string | null;
   path: string | null;
-  is_active: number;
+  is_active: boolean;
   children?: ApiCategory[];
 }
 
@@ -47,7 +62,7 @@ export interface ApiBrand {
   name: string;
   slug: string;
   logo_url: string | null;
-  is_active: number;
+  is_active: boolean;
 }
 
 export interface ApiMerchant {
@@ -55,7 +70,7 @@ export interface ApiMerchant {
   name: string;
   email: string;
   source_type: string;
-  shopify_configured: number;
-  is_active: number;
+  shopify_configured: boolean;
+  is_active: boolean;
   created_at: string;
 }

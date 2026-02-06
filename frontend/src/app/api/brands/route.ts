@@ -5,10 +5,10 @@ import { NextResponse } from "next/server";
 export async function GET() {
   try {
     const db = getDb();
-    const brands = db.prepare(`
+    const brands = await db.prepare(`
       SELECT id, name, slug, logo_url, is_active
       FROM brands
-      WHERE is_active = 1
+      WHERE is_active = true
       ORDER BY name
     `).all();
 

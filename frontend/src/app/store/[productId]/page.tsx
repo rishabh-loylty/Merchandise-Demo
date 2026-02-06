@@ -14,7 +14,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 
 export default function ProductDetailPage() {
@@ -39,8 +39,20 @@ export default function ProductDetailPage() {
 
   const [selectedImage, setSelectedImage] = useState(0);
   const [redeemState, setRedeemState] = useState<"idle" | "loading" | "success">("idle");
+  const variants = product?.variants ?? [];
+  const offers = product?.offers ?? [];
+  const hasVariants = variants.length > 0;
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
 
   const rate = selectedBank?.points_to_currency_rate ?? 0.25;
+
+  useEffect(() => {
+    if (variants.length === 1) {
+      setSelectedVariantId(variants[0]?.id ?? null);
+    } else {
+      setSelectedVariantId(null);
+    }
+  }, [variants]);
 
   if (isLoading) {
     return (
@@ -63,8 +75,15 @@ export default function ProductDetailPage() {
     );
   }
 
-  const points = Math.ceil(product.base_price / rate).toLocaleString();
+  const selectedOffer = offers[0];
+  const selectedPrice = selectedOffer?.cached_price_minor
+    ? selectedOffer.cached_price_minor / 100
+    : product.base_price;
+  const points = Math.ceil(selectedPrice / rate).toLocaleString();
   const images = [product.image_url, product.image_url, product.image_url];
+  const activeVariantId = selectedVariantId ?? (variants.length === 1 ? variants[0]?.id ?? null : null);
+
+  
 
   const handleRedeem = () => {
     setRedeemState("loading");
@@ -148,6 +167,60 @@ export default function ProductDetailPage() {
             </div>
             <p className="mt-2 text-xs text-muted-foreground">1 point = {rate} INR</p>
           </div>
+
+          {/* Variants */}
+          {hasVariants && (
+            <div className="mb-6 rounded-xl border border-border bg-card p-4">
+              <h3 className="mb-3 text-sm font-semibold text-foreground">Available Variants</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {variants.map((variant) => (
+                  <div
+                    key={variant.id}
+                    className={`rounded-lg border px-3 py-2 text-sm ${
+                      activeVariantId === variant.id
+                        ? "border-primary bg-primary/5"
+                        : "border-border bg-background"
+                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setSelectedVariantId(variant.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedVariantId(variant.id);
+                      }
+                    }}
+                  >
+                    <div className="font-medium text-foreground">{variant.internal_sku}</div>
+                    {variant.attributes && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {Object.entries(variant.attributes)
+                          .map(([key, value]) => `${key}: ${String(value)}`)
+                          .join(" • ")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Merchants */}
+          {offers.length > 1 && (
+            <div className="mb-6 rounded-xl border border-border bg-card p-4">
+              <h3 className="mb-3 text-sm font-semibold text-foreground">Available Merchants</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {offers.map((offer) => (
+                  <div key={offer.id} className="rounded-lg border border-border bg-background px-3 py-2 text-sm">
+                    <div className="font-medium text-foreground">{offer.merchant_name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      INR {(offer.cached_price_minor / 100).toLocaleString()} • Stock {offer.current_stock}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Redeem Button */}
           <button

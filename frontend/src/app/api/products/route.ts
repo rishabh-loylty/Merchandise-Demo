@@ -1,5 +1,6 @@
 import { getDb } from "@/lib/db";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 // GET /api/products - List products with filters
 // Query params: status, category, query, brands, minPrice, maxPrice, minRating, merchantId
@@ -18,22 +19,23 @@ export async function GET(request: NextRequest) {
     const merchantId = searchParams.get("merchantId");
 
     let sql = `
-      SELECT 
-        p.id, p.title, p.slug, p.description, p.image_url, p.base_price,
-        p.rating, p.review_count, p.status as product_status,
-        b.name as brand_name, b.slug as brand_slug,
-        v.internal_sku as sku,
-        mo.offer_status, mo.merchant_id, mo.cached_price_minor, mo.current_stock,
-        m.name as merchant_name,
-        c.slug as category_slug, c.name as category_name
-      FROM products p
-      LEFT JOIN brands b ON p.brand_id = b.id
-      LEFT JOIN variants v ON v.product_id = p.id
-      LEFT JOIN merchant_offers mo ON mo.variant_id = v.id
-      LEFT JOIN merchants m ON mo.merchant_id = m.id
-      LEFT JOIN product_categories pc ON pc.product_id = p.id
-      LEFT JOIN categories c ON pc.category_id = c.id AND c.parent_id IS NULL
-      WHERE p.status = 'ACTIVE'
+      SELECT * FROM (
+        SELECT DISTINCT ON (p.id)
+          p.id, p.title, p.slug, p.description, p.image_url, p.base_price,
+          p.rating, p.review_count, p.status as product_status, p.created_at,
+          b.name as brand_name, b.slug as brand_slug,
+          v.internal_sku as sku,
+          mo.offer_status, mo.merchant_id, mo.cached_price_minor, mo.current_stock,
+          m.name as merchant_name,
+          c.slug as category_slug, c.name as category_name
+        FROM products p
+        LEFT JOIN brands b ON p.brand_id = b.id
+        LEFT JOIN variants v ON v.product_id = p.id
+        LEFT JOIN merchant_offers mo ON mo.variant_id = v.id
+        LEFT JOIN merchants m ON mo.merchant_id = m.id
+        LEFT JOIN product_categories pc ON pc.product_id = p.id
+        LEFT JOIN categories c ON pc.category_id = c.id AND c.parent_id IS NULL
+        WHERE p.status = 'ACTIVE'
     `;
 
     const params: unknown[] = [];
@@ -87,9 +89,9 @@ export async function GET(request: NextRequest) {
       params.push(Number(merchantId));
     }
 
-    sql += " GROUP BY p.id ORDER BY p.created_at DESC";
+    sql += " ORDER BY p.id, (mo.offer_status IS NULL), v.id, p.created_at DESC) AS product_rows ORDER BY created_at DESC";
 
-    const products = db.prepare(sql).all(...params);
+    const products = await db.prepare(sql).all(...params);
 
     return NextResponse.json(products);
   } catch (error) {
