@@ -2,27 +2,28 @@ import { neon } from "@neondatabase/serverless";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
-  console.error("Missing DATABASE_URL. Set it in .env or the shell.");
-  process.exit(1);
+	console.error("Missing DATABASE_URL. Set it in .env or the shell.");
+	process.exit(1);
 }
 
 const sql = neon(databaseUrl);
 
 const schemaStatements = [
-  `CREATE TABLE IF NOT EXISTS currencies (
+	`CREATE TABLE IF NOT EXISTS currencies (
     code TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     minor_units INTEGER NOT NULL,
     symbol TEXT NOT NULL
   )`,
-  `CREATE TABLE IF NOT EXISTS loyalty_partners (
+	`CREATE TABLE IF NOT EXISTS loyalty_partners (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     is_active BOOLEAN DEFAULT TRUE NOT NULL,
     configuration JSONB,
+    store_config JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS point_conversion_rules (
+	`CREATE TABLE IF NOT EXISTS point_conversion_rules (
     id SERIAL PRIMARY KEY,
     partner_id INTEGER NOT NULL REFERENCES loyalty_partners(id) ON DELETE CASCADE,
     currency_code TEXT NOT NULL REFERENCES currencies(code) ON DELETE RESTRICT,
@@ -31,7 +32,7 @@ const schemaStatements = [
     valid_to TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT TRUE NOT NULL
   )`,
-  `CREATE TABLE IF NOT EXISTS merchants (
+	`CREATE TABLE IF NOT EXISTS merchants (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     email TEXT,
@@ -42,7 +43,7 @@ const schemaStatements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS categories (
+	`CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
@@ -51,7 +52,7 @@ const schemaStatements = [
     path TEXT,
     is_active BOOLEAN DEFAULT TRUE
   )`,
-  `CREATE TABLE IF NOT EXISTS brands (
+	`CREATE TABLE IF NOT EXISTS brands (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     slug TEXT NOT NULL UNIQUE,
@@ -59,7 +60,7 @@ const schemaStatements = [
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS margin_rules (
+	`CREATE TABLE IF NOT EXISTS margin_rules (
     id SERIAL PRIMARY KEY,
     merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     brand_id INTEGER REFERENCES brands(id) ON DELETE CASCADE,
@@ -69,7 +70,7 @@ const schemaStatements = [
     valid_to TIMESTAMPTZ,
     is_active BOOLEAN DEFAULT TRUE
   )`,
-  `CREATE TABLE IF NOT EXISTS staging_products (
+	`CREATE TABLE IF NOT EXISTS staging_products (
     id SERIAL PRIMARY KEY,
     merchant_id INTEGER NOT NULL REFERENCES merchants(id),
     external_product_id TEXT,
@@ -84,7 +85,7 @@ const schemaStatements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS staging_variants (
+	`CREATE TABLE IF NOT EXISTS staging_variants (
     id SERIAL PRIMARY KEY,
     staging_product_id INTEGER REFERENCES staging_products(id) ON DELETE CASCADE,
     external_variant_id TEXT,
@@ -96,7 +97,7 @@ const schemaStatements = [
     matched_master_variant_id INTEGER,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS products (
+	`CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     brand_id INTEGER REFERENCES brands(id),
     title TEXT NOT NULL,
@@ -111,12 +112,12 @@ const schemaStatements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS product_categories (
+	`CREATE TABLE IF NOT EXISTS product_categories (
     product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
     category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
     PRIMARY KEY (product_id, category_id)
   )`,
-  `CREATE TABLE IF NOT EXISTS variants (
+	`CREATE TABLE IF NOT EXISTS variants (
     id SERIAL PRIMARY KEY,
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     internal_sku TEXT NOT NULL UNIQUE,
@@ -128,7 +129,7 @@ const schemaStatements = [
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS media (
+	`CREATE TABLE IF NOT EXISTS media (
     id SERIAL PRIMARY KEY,
     product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     src_url TEXT NOT NULL,
@@ -136,12 +137,12 @@ const schemaStatements = [
     position INTEGER DEFAULT 0 NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
   )`,
-  `CREATE TABLE IF NOT EXISTS variant_media (
+	`CREATE TABLE IF NOT EXISTS variant_media (
     variant_id INTEGER NOT NULL REFERENCES variants(id) ON DELETE CASCADE,
     media_id INTEGER NOT NULL REFERENCES media(id) ON DELETE CASCADE,
     PRIMARY KEY (variant_id, media_id)
   )`,
-  `CREATE TABLE IF NOT EXISTS merchant_offers (
+	`CREATE TABLE IF NOT EXISTS merchant_offers (
     id SERIAL PRIMARY KEY,
     merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     variant_id INTEGER NOT NULL REFERENCES variants(id) ON DELETE CASCADE,
@@ -160,7 +161,7 @@ const schemaStatements = [
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (merchant_id, variant_id)
   )`,
-  `CREATE TABLE IF NOT EXISTS offer_price_log (
+	`CREATE TABLE IF NOT EXISTS offer_price_log (
     id SERIAL PRIMARY KEY,
     offer_id INTEGER REFERENCES merchant_offers(id) ON DELETE CASCADE,
     currency_code TEXT NOT NULL,
@@ -170,7 +171,7 @@ const schemaStatements = [
     valid_from TIMESTAMPTZ DEFAULT NOW(),
     valid_to TIMESTAMPTZ
   )`,
-  `CREATE TABLE IF NOT EXISTS sync_logs (
+	`CREATE TABLE IF NOT EXISTS sync_logs (
     id SERIAL PRIMARY KEY,
     merchant_id INTEGER NOT NULL REFERENCES merchants(id) ON DELETE CASCADE,
     status TEXT NOT NULL CHECK(status IN ('SUCCESS','FAILED','IN_PROGRESS','PARTIAL_SUCCESS')),
@@ -180,22 +181,37 @@ const schemaStatements = [
     records_failed INTEGER DEFAULT 0,
     notes TEXT
   )`,
-  "CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id)",
-  "CREATE INDEX IF NOT EXISTS idx_staging_prod_merchant ON staging_products(merchant_id)",
-  "CREATE INDEX IF NOT EXISTS idx_variants_gtin ON variants(gtin)",
-  "CREATE INDEX IF NOT EXISTS idx_offers_merchant ON merchant_offers(merchant_id)",
-  "CREATE INDEX IF NOT EXISTS idx_offers_variant ON merchant_offers(variant_id)",
-  "CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)",
+	"CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id)",
+	"CREATE INDEX IF NOT EXISTS idx_staging_prod_merchant ON staging_products(merchant_id)",
+	"CREATE INDEX IF NOT EXISTS idx_variants_gtin ON variants(gtin)",
+	"CREATE INDEX IF NOT EXISTS idx_offers_merchant ON merchant_offers(merchant_id)",
+	"CREATE INDEX IF NOT EXISTS idx_offers_variant ON merchant_offers(variant_id)",
+	"CREATE INDEX IF NOT EXISTS idx_product_categories_cat ON product_categories(category_id)",
 ];
 
 for (const statement of schemaStatements) {
-  await sql.query(statement);
+	await sql.query(statement);
 }
 
-const countRows = await sql.query("SELECT COUNT(*)::int AS cnt FROM currencies");
+// Migration: Add store_config column if it doesn't exist
+console.log("Running migrations...");
+try {
+	await sql.query(`
+		ALTER TABLE loyalty_partners
+		ADD COLUMN IF NOT EXISTS store_config JSONB DEFAULT '{}'::jsonb
+	`);
+	console.log("✓ store_config column exists or was added");
+} catch (err) {
+	// Column might already exist, which is fine
+	console.log("store_config column check:", err.message);
+}
+
+const countRows = await sql.query(
+	"SELECT COUNT(*)::int AS cnt FROM currencies",
+);
 const cnt = countRows[0]?.cnt ?? 0;
 if (cnt === 0) {
-  await sql.query(`
+	await sql.query(`
     INSERT INTO currencies (code, name, minor_units, symbol)
     VALUES
       ('INR', 'Indian Rupee', 2, '₹'),
@@ -203,18 +219,400 @@ if (cnt === 0) {
     ON CONFLICT (code) DO NOTHING
   `);
 
-  await sql.query(`
-    INSERT INTO loyalty_partners (id, name, is_active, configuration)
-    VALUES
-      (1, 'SBI', true, '{"brand_color":"#00457c"}'::jsonb),
-      (2, 'HDFC Bank', true, '{"brand_color":"#004c8f"}'::jsonb),
-      (3, 'Axis Bank', true, '{"brand_color":"#97144d"}'::jsonb),
-      (4, 'Yes Bank', true, '{"brand_color":"#132054"}'::jsonb),
-      (5, 'IndusInd Bank', true, '{"brand_color":"#00529b"}'::jsonb)
-    ON CONFLICT (id) DO NOTHING
-  `);
+	// Default store configuration template
+	const defaultStoreConfig = {
+		theme: {
+			colors: {
+				primary: "#1e40af",
+				primaryForeground: "#ffffff",
+				secondary: "#f1f5f9",
+				secondaryForeground: "#0f172a",
+				accent: "#dbeafe",
+				accentForeground: "#1e3a5f",
+				background: "#ffffff",
+				foreground: "#0f172a",
+				muted: "#f1f5f9",
+				mutedForeground: "#64748b",
+				card: "#ffffff",
+				cardForeground: "#0f172a",
+				border: "#e2e8f0",
+				destructive: "#dc2626",
+				success: "#16a34a",
+				warning: "#ca8a04",
+			},
+			typography: {
+				fontFamily: "Inter, system-ui, sans-serif",
+				headingFontFamily: "Inter, system-ui, sans-serif",
+				baseFontSize: "16px",
+				headingWeight: "700",
+				bodyWeight: "400",
+			},
+			borderRadius: "0.5rem",
+			spacing: {
+				containerMaxWidth: "1280px",
+				sectionPadding: "3rem",
+			},
+		},
+		branding: {
+			storeName: "Rewards Store",
+			logo: null,
+			logoDark: null,
+			favicon: null,
+			tagline: "Redeem your points for amazing rewards",
+		},
+		header: {
+			style: "standard",
+			sticky: true,
+			showSearch: true,
+			showPointsBalance: true,
+			backgroundColor: null,
+			transparent: false,
+		},
+		footer: {
+			style: "standard",
+			showSocialLinks: true,
+			socialLinks: {
+				facebook: null,
+				twitter: null,
+				instagram: null,
+				linkedin: null,
+			},
+			copyrightText: "© 2025 All rights reserved.",
+			quickLinks: [
+				{ label: "About Us", url: "/about" },
+				{ label: "Contact", url: "/contact" },
+				{ label: "Terms & Conditions", url: "/terms" },
+				{ label: "Privacy Policy", url: "/privacy" },
+			],
+			showNewsletter: false,
+		},
+		homepage: {
+			sections: [
+				{
+					type: "hero",
+					enabled: true,
+					config: {
+						style: "carousel",
+						autoRotate: true,
+						autoRotateSpeed: 5000,
+						showDots: true,
+						showArrows: true,
+						slides: [
+							{
+								title: "Redeem Your Rewards",
+								subtitle: "Turn your points into premium products",
+								image: null,
+								ctaText: "Shop Now",
+								ctaLink: "/store/search",
+								backgroundColor: null,
+							},
+						],
+					},
+				},
+				{
+					type: "categories",
+					enabled: true,
+					config: {
+						title: "Shop by Category",
+						subtitle: "Explore our wide range of categories",
+						style: "grid",
+						showIcons: true,
+						maxItems: 6,
+					},
+				},
+				{
+					type: "featuredProducts",
+					enabled: true,
+					config: {
+						title: "Featured Products",
+						subtitle: "Hand-picked products just for you",
+						style: "grid",
+						maxItems: 8,
+						showViewAll: true,
+					},
+				},
+				{
+					type: "promotionalBanner",
+					enabled: false,
+					config: {
+						banners: [],
+					},
+				},
+				{
+					type: "brands",
+					enabled: true,
+					config: {
+						title: "Top Brands",
+						subtitle: "Shop from your favorite brands",
+						style: "carousel",
+						maxItems: 10,
+					},
+				},
+				{
+					type: "trustBadges",
+					enabled: true,
+					config: {
+						badges: [
+							{
+								icon: "Shield",
+								title: "Secure Redemption",
+								description: "100% safe & secure",
+							},
+							{
+								icon: "Truck",
+								title: "Fast Delivery",
+								description: "Quick shipping",
+							},
+							{
+								icon: "RefreshCw",
+								title: "Easy Returns",
+								description: "Hassle-free returns",
+							},
+							{
+								icon: "Headphones",
+								title: "24/7 Support",
+								description: "Always here to help",
+							},
+						],
+					},
+				},
+				{
+					type: "deals",
+					enabled: false,
+					config: {
+						title: "Hot Deals",
+						showCountdown: true,
+						maxItems: 4,
+					},
+				},
+				{
+					type: "newArrivals",
+					enabled: true,
+					config: {
+						title: "New Arrivals",
+						subtitle: "Check out the latest additions",
+						style: "carousel",
+						maxItems: 8,
+					},
+				},
+			],
+		},
+		productCard: {
+			showBrand: true,
+			showRating: true,
+			showPointsPrice: true,
+			showCurrencyPrice: true,
+			showQuickView: false,
+			showWishlist: false,
+			imageAspectRatio: "square",
+			hoverEffect: "zoom",
+		},
+		productListing: {
+			defaultView: "grid",
+			productsPerRow: 4,
+			productsPerPage: 12,
+			defaultSort: "featured",
+			showFilters: true,
+			filterPosition: "left",
+		},
+		pointsDisplay: {
+			showPointsProminent: true,
+			pointsLabel: "pts",
+			showCurrencyEquivalent: true,
+			primaryDisplay: "points",
+		},
+		components: {
+			buttons: {
+				borderRadius: "0.5rem",
+				style: "solid",
+				textTransform: "none",
+			},
+			cards: {
+				borderRadius: "0.75rem",
+				shadow: "sm",
+				border: true,
+				hoverEffect: "lift",
+			},
+			inputs: {
+				borderRadius: "0.5rem",
+				style: "outline",
+			},
+		},
+		features: {
+			wishlist: false,
+			compare: false,
+			quickView: false,
+			socialSharing: true,
+			recentlyViewed: true,
+			productReviews: true,
+		},
+		customCss: "",
+		analytics: {
+			googleAnalyticsId: null,
+			facebookPixelId: null,
+		},
+	};
 
-  await sql.query(`
+	// Bank-specific configurations
+	const sbiConfig = {
+		...defaultStoreConfig,
+		theme: {
+			...defaultStoreConfig.theme,
+			colors: {
+				...defaultStoreConfig.theme.colors,
+				primary: "#00457c",
+				primaryForeground: "#ffffff",
+				accent: "#e6f0f7",
+				accentForeground: "#00457c",
+			},
+		},
+		branding: {
+			storeName: "SBI Rewardz",
+			logo: null,
+			tagline: "Redeem your SBI reward points",
+		},
+		homepage: {
+			...defaultStoreConfig.homepage,
+			sections: defaultStoreConfig.homepage.sections.map((s) =>
+				s.type === "hero"
+					? {
+							...s,
+							config: {
+								...s.config,
+								slides: [
+									{
+										title: "Welcome to SBI Rewardz",
+										subtitle:
+											"Redeem your reward points for exclusive products",
+										ctaText: "Start Shopping",
+										ctaLink: "/store/search",
+									},
+								],
+							},
+						}
+					: s,
+			),
+		},
+	};
+
+	const hdfcConfig = {
+		...defaultStoreConfig,
+		theme: {
+			...defaultStoreConfig.theme,
+			colors: {
+				...defaultStoreConfig.theme.colors,
+				primary: "#004c8f",
+				primaryForeground: "#ffffff",
+				accent: "#e6f2ff",
+				accentForeground: "#004c8f",
+			},
+		},
+		branding: {
+			storeName: "HDFC SmartBuy",
+			logo: null,
+			tagline: "Smart rewards for smart customers",
+		},
+		homepage: {
+			...defaultStoreConfig.homepage,
+			sections: defaultStoreConfig.homepage.sections.map((s) =>
+				s.type === "hero"
+					? {
+							...s,
+							config: {
+								...s.config,
+								slides: [
+									{
+										title: "HDFC SmartBuy Rewards",
+										subtitle: "Convert your reward points to premium products",
+										ctaText: "Explore Now",
+										ctaLink: "/store/search",
+									},
+								],
+							},
+						}
+					: s,
+			),
+		},
+	};
+
+	const axisConfig = {
+		...defaultStoreConfig,
+		theme: {
+			...defaultStoreConfig.theme,
+			colors: {
+				...defaultStoreConfig.theme.colors,
+				primary: "#97144d",
+				primaryForeground: "#ffffff",
+				accent: "#fce7ef",
+				accentForeground: "#97144d",
+			},
+		},
+		branding: {
+			storeName: "Axis Edge Rewards",
+			logo: null,
+			tagline: "Get more from your Axis Bank points",
+		},
+	};
+
+	const yesConfig = {
+		...defaultStoreConfig,
+		theme: {
+			...defaultStoreConfig.theme,
+			colors: {
+				...defaultStoreConfig.theme.colors,
+				primary: "#132054",
+				primaryForeground: "#ffffff",
+				accent: "#e8eaf2",
+				accentForeground: "#132054",
+			},
+		},
+		branding: {
+			storeName: "YES Rewardz",
+			logo: null,
+			tagline: "YES to amazing rewards",
+		},
+	};
+
+	const indusindConfig = {
+		...defaultStoreConfig,
+		theme: {
+			...defaultStoreConfig.theme,
+			colors: {
+				...defaultStoreConfig.theme.colors,
+				primary: "#00529b",
+				primaryForeground: "#ffffff",
+				accent: "#e6f0f8",
+				accentForeground: "#00529b",
+			},
+		},
+		branding: {
+			storeName: "IndusInd Rewards",
+			logo: null,
+			tagline: "Unlock exclusive rewards with IndusInd",
+		},
+	};
+
+	await sql.query(
+		`
+    INSERT INTO loyalty_partners (id, name, is_active, configuration, store_config)
+    VALUES
+      (1, 'SBI', true, '{"brand_color":"#00457c"}'::jsonb, $1::jsonb),
+      (2, 'HDFC Bank', true, '{"brand_color":"#004c8f"}'::jsonb, $2::jsonb),
+      (3, 'Axis Bank', true, '{"brand_color":"#97144d"}'::jsonb, $3::jsonb),
+      (4, 'Yes Bank', true, '{"brand_color":"#132054"}'::jsonb, $4::jsonb),
+      (5, 'IndusInd Bank', true, '{"brand_color":"#00529b"}'::jsonb, $5::jsonb)
+    ON CONFLICT (id) DO UPDATE SET store_config = EXCLUDED.store_config
+  `,
+		[
+			JSON.stringify(sbiConfig),
+			JSON.stringify(hdfcConfig),
+			JSON.stringify(axisConfig),
+			JSON.stringify(yesConfig),
+			JSON.stringify(indusindConfig),
+		],
+	);
+
+	await sql.query(`
     INSERT INTO point_conversion_rules (id, partner_id, currency_code, points_to_currency_rate, is_active)
     VALUES
       (1, 1, 'INR', 0.25, true),
@@ -225,7 +623,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO merchants (id, name, email, source_type, source_config, shopify_configured)
     VALUES
       (1, 'Seller A', 'seller.a@example.com', 'SHOPIFY', '{"store_url":"seller-a.myshopify.com"}'::jsonb, true),
@@ -233,7 +631,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO categories (id, parent_id, name, slug, icon, path, is_active)
     VALUES
       (1, NULL, 'Kitchen', 'kitchen', 'ChefHat', 'Kitchen', true),
@@ -258,7 +656,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO brands (id, name, slug)
     VALUES
       (1, 'Prestige', 'prestige'),
@@ -274,7 +672,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO products (id, brand_id, title, slug, description, image_url, base_price, rating, review_count, status)
     VALUES
       (1, 1, 'Prestige Svachh Pressure Cooker 5L', 'prestige-svachh-pressure-cooker-5l',
@@ -328,7 +726,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO product_categories (product_id, category_id)
     VALUES
       (1, 1), (2, 2), (3, 3), (4, 1), (5, 2), (6, 3),
@@ -336,7 +734,7 @@ if (cnt === 0) {
     ON CONFLICT (product_id, category_id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO variants (id, product_id, internal_sku, is_active)
     VALUES
       (1, 1, 'PRE-SC-5L', true),
@@ -354,7 +752,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO variants (id, product_id, internal_sku, attributes, is_active)
     VALUES
       (13, 1, 'PRE-SC-3L', '{"Size":"3L"}'::jsonb, true),
@@ -364,7 +762,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO merchant_offers (
       id, merchant_id, variant_id, currency_code,
       cached_price_minor, cached_settlement_price_minor,
@@ -387,7 +785,7 @@ if (cnt === 0) {
     ON CONFLICT (id) DO NOTHING
   `);
 
-  await sql.query(`
+	await sql.query(`
     INSERT INTO staging_products (id, merchant_id, external_product_id, raw_title, raw_vendor, raw_product_type, status)
     VALUES
       (1, 1, 'shopify-prod-10', 'Prestige Iris Plus Mixer Grinder 750W', 'Prestiege Inc', 'Kitchen', 'NEEDS_REVIEW'),
@@ -398,24 +796,24 @@ if (cnt === 0) {
 }
 
 const tablesWithId = [
-  "loyalty_partners",
-  "point_conversion_rules",
-  "merchants",
-  "categories",
-  "brands",
-  "margin_rules",
-  "staging_products",
-  "staging_variants",
-  "products",
-  "variants",
-  "media",
-  "merchant_offers",
-  "offer_price_log",
-  "sync_logs",
+	"loyalty_partners",
+	"point_conversion_rules",
+	"merchants",
+	"categories",
+	"brands",
+	"margin_rules",
+	"staging_products",
+	"staging_variants",
+	"products",
+	"variants",
+	"media",
+	"merchant_offers",
+	"offer_price_log",
+	"sync_logs",
 ];
 
 for (const table of tablesWithId) {
-  await sql.query(`
+	await sql.query(`
     SELECT CASE
       WHEN (SELECT MAX(id) FROM ${table}) IS NULL THEN
         setval(pg_get_serial_sequence('${table}', 'id'), 1, false)

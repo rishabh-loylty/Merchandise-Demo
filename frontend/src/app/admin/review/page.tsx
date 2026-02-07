@@ -1,415 +1,861 @@
 "use client";
 
-import { fetcher } from "@/lib/fetcher";
-import type { ApiBrand, ApiCategory, ApiProduct } from "@/lib/types";
-import {
-  Check,
-  ChevronDown,
-  ClipboardCheck,
-  Search,
-  Shield,
-  X,
-} from "lucide-react";
+import * as React from "react";
 import Image from "next/image";
-import { useState } from "react";
+import { fetcher } from "@/lib/fetcher";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import { Badge, StatusBadge } from "@/components/ui/badge";
+import {
+	Select,
+	SelectTrigger,
+	SelectContent,
+	SelectItem,
+	SelectValue,
+} from "@/components/ui/select";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogDescription,
+	DialogFooter,
+} from "@/components/ui/dialog";
+import {
+	Table,
+	TableHeader,
+	TableBody,
+	TableHead,
+	TableRow,
+	TableCell,
+	TableEmpty,
+	TablePagination,
+} from "@/components/ui/table";
+import { SimpleTabs } from "@/components/ui/tabs";
+import {
+	PageHeader,
+	Container,
+	PageWrapper,
+} from "@/components/layout/page-header";
+import { toast } from "@/components/providers";
+import {
+	ClipboardCheck,
+	Search,
+	Check,
+	X,
+	ChevronDown,
+	Eye,
+	AlertTriangle,
+	CheckCircle2,
+	XCircle,
+	Filter,
+	RefreshCw,
+	ArrowRight,
+	Package,
+	Store,
+	Tag,
+	Layers,
+} from "lucide-react";
 import useSWR from "swr";
+import type { ApiProduct, ApiBrand, ApiCategory } from "@/lib/types";
+
+// Rejection reason presets
+const REJECTION_REASONS = [
+	{ value: "pricing", label: "Invalid or unrealistic pricing" },
+	{ value: "images", label: "Poor quality or inappropriate images" },
+	{ value: "description", label: "Incomplete or misleading description" },
+	{ value: "category", label: "Incorrect category assignment" },
+	{ value: "brand", label: "Brand verification failed" },
+	{ value: "duplicate", label: "Duplicate product listing" },
+	{ value: "prohibited", label: "Prohibited item category" },
+	{ value: "quality", label: "Product quality concerns" },
+	{ value: "other", label: "Other (specify below)" },
+];
 
 export default function AdminReviewPage() {
-  const { data: pendingProducts, isLoading, mutate } = useSWR<ApiProduct[]>(
-    "/api/admin/review",
-    fetcher
-  );
-  const [selectedProduct, setSelectedProduct] = useState<ApiProduct | null>(null);
-  const [reviewOpen, setReviewOpen] = useState(false);
+	const {
+		data: pendingProducts,
+		isLoading,
+		mutate,
+	} = useSWR<ApiProduct[]>("/api/admin/review", fetcher);
+	const { data: brands } = useSWR<ApiBrand[]>("/api/brands", fetcher);
+	const { data: categories } = useSWR<ApiCategory[]>(
+		"/api/categories",
+		fetcher,
+	);
 
-  const products = pendingProducts ?? [];
+	const [selectedProduct, setSelectedProduct] =
+		React.useState<ApiProduct | null>(null);
+	const [reviewModalOpen, setReviewModalOpen] = React.useState(false);
+	const [rejectModalOpen, setRejectModalOpen] = React.useState(false);
+	const [searchQuery, setSearchQuery] = React.useState("");
+	const [filterMerchant, setFilterMerchant] = React.useState<string>("all");
 
-  const handleReview = (product: ApiProduct) => {
-    setSelectedProduct(product);
-    setReviewOpen(true);
-  };
+	// Get unique merchants from products
+	const merchants = React.useMemo(() => {
+		if (!pendingProducts) return [];
+		const uniqueMerchants = new Map<number, string>();
+		pendingProducts.forEach((p) => {
+			if (p.merchant_id && p.merchant_name) {
+				uniqueMerchants.set(p.merchant_id, p.merchant_name);
+			}
+		});
+		return Array.from(uniqueMerchants.entries()).map(([id, name]) => ({
+			id,
+			name,
+		}));
+	}, [pendingProducts]);
 
-  const handleApprove = async (productId: number) => {
-    setReviewOpen(false);
-    setSelectedProduct(null);
-    mutate(); // Refresh from API
-  };
+	// Filter products
+	const filteredProducts = React.useMemo(() => {
+		if (!pendingProducts) return [];
+		return pendingProducts.filter((p) => {
+			const matchesSearch =
+				!searchQuery ||
+				p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+				p.brand_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+				p.merchant_name?.toLowerCase().includes(searchQuery.toLowerCase());
+			const matchesMerchant =
+				filterMerchant === "all" || String(p.merchant_id) === filterMerchant;
+			return matchesSearch && matchesMerchant;
+		});
+	}, [pendingProducts, searchQuery, filterMerchant]);
 
-  const handleReject = async (productId: number) => {
-    setReviewOpen(false);
-    setSelectedProduct(null);
-    mutate(); // Refresh from API
-  };
+	const handleOpenReview = (product: ApiProduct) => {
+		setSelectedProduct(product);
+		setReviewModalOpen(true);
+	};
 
-  return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="mb-8">
-        <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-          <Shield className="h-6 w-6 text-primary" />
-          Admin Review Dashboard
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Review and approve products before they go live on the marketplace
-        </p>
-      </div>
+	const handleOpenReject = (product: ApiProduct) => {
+		setSelectedProduct(product);
+		setRejectModalOpen(true);
+	};
 
-      {/* Stats */}
-      <div className="mb-6 flex items-center gap-4">
-        <div className="flex items-center gap-2 rounded-lg border border-border bg-warning/5 px-4 py-2.5">
-          <ClipboardCheck className="h-5 w-5 text-warning" />
-          <span className="text-sm font-medium text-foreground">
-            {products.length} item{products.length !== 1 ? "s" : ""} pending review
-          </span>
-        </div>
-      </div>
+	const handleApproveSuccess = () => {
+		setReviewModalOpen(false);
+		setSelectedProduct(null);
+		mutate();
+		toast.success("Product approved successfully", {
+			description: "The product is now live on the marketplace.",
+		});
+	};
 
-      {/* Review Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm">
-        {isLoading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          </div>
-        ) : products.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <Check className="mb-4 h-12 w-12 text-success" />
-            <h3 className="mb-2 text-lg font-semibold text-foreground">All caught up!</h3>
-            <p className="text-sm text-muted-foreground">No products pending review</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Product</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Vendor</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">SKU</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Price</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
-                  <th className="px-6 py-3 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {products.map((product) => (
-                  <tr key={product.id} className="hover:bg-muted/30">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-                          <Image src={product.image_url} alt={product.title} fill className="object-cover" sizes="40px" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{product.title}</p>
-                          <p className="text-xs text-muted-foreground">{product.brand_name}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{product.raw_vendor ?? product.merchant_name}</td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{product.sku}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">INR {product.base_price.toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">
-                        Pending Review
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => handleReview(product)}
-                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                      >
-                        Review
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+	const handleRejectSuccess = () => {
+		setRejectModalOpen(false);
+		setSelectedProduct(null);
+		mutate();
+		toast.success("Product rejected", {
+			description: "The merchant has been notified with the rejection reason.",
+		});
+	};
 
-      {/* Review Modal */}
-      {reviewOpen && selectedProduct && (
-        <ReviewModal
-          product={selectedProduct}
-          onClose={() => {
-            setReviewOpen(false);
-            setSelectedProduct(null);
-          }}
-          onApprove={handleApprove}
-          onReject={handleReject}
-        />
-      )}
-    </div>
-  );
+	const handleQuickApprove = async (product: ApiProduct) => {
+		try {
+			const res = await fetch(`/api/admin/review/${product.id}`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ action: "approve" }),
+			});
+			if (!res.ok) throw new Error("Failed to approve");
+			mutate();
+			toast.success("Product approved", {
+				description: product.title,
+			});
+		} catch {
+			toast.error("Failed to approve product");
+		}
+	};
+
+	return (
+		<PageWrapper>
+			<Container>
+				<PageHeader
+					title="Product Review"
+					description="Review and approve products before they go live on the marketplace"
+					icon={ClipboardCheck}
+					badge={
+						pendingProducts && pendingProducts.length > 0 ? (
+							<Badge variant="warning" size="lg">
+								{pendingProducts.length} Pending
+							</Badge>
+						) : null
+					}
+					actions={
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => mutate()}
+							leftIcon={<RefreshCw className="h-4 w-4" />}
+						>
+							Refresh
+						</Button>
+					}
+				/>
+
+				{/* Filters */}
+				<Card className="mt-6" padding="sm">
+					<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+						<div className="flex flex-1 items-center gap-3">
+							<div className="relative flex-1 max-w-md">
+								<Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+								<Input
+									placeholder="Search products, brands, merchants..."
+									value={searchQuery}
+									onChange={(e) => setSearchQuery(e.target.value)}
+									className="pl-10"
+									inputSize="sm"
+								/>
+							</div>
+							<Select value={filterMerchant} onValueChange={setFilterMerchant}>
+								<SelectTrigger className="w-[180px]" size="sm">
+									<SelectValue placeholder="All Merchants" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="all">All Merchants</SelectItem>
+									{merchants.map((m) => (
+										<SelectItem key={m.id} value={String(m.id)}>
+											{m.name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+						</div>
+						<div className="text-sm text-muted-foreground">
+							{filteredProducts.length} of {pendingProducts?.length ?? 0} items
+						</div>
+					</div>
+				</Card>
+
+				{/* Review Table */}
+				<Card className="mt-6" padding="none">
+					{isLoading ? (
+						<div className="flex items-center justify-center py-20">
+							<div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+						</div>
+					) : filteredProducts.length === 0 ? (
+						<div className="flex flex-col items-center justify-center py-20 text-center">
+							{pendingProducts?.length === 0 ? (
+								<>
+									<CheckCircle2 className="mb-4 h-16 w-16 text-success" />
+									<h3 className="mb-2 text-xl font-semibold text-foreground">
+										All caught up!
+									</h3>
+									<p className="text-muted-foreground">
+										No products pending review at the moment.
+									</p>
+								</>
+							) : (
+								<>
+									<Search className="mb-4 h-16 w-16 text-muted-foreground" />
+									<h3 className="mb-2 text-xl font-semibold text-foreground">
+										No matching products
+									</h3>
+									<p className="text-muted-foreground">
+										Try adjusting your search or filter criteria.
+									</p>
+									<Button
+										variant="outline"
+										className="mt-4"
+										onClick={() => {
+											setSearchQuery("");
+											setFilterMerchant("all");
+										}}
+									>
+										Clear Filters
+									</Button>
+								</>
+							)}
+						</div>
+					) : (
+						<div className="overflow-x-auto">
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead className="w-[350px]">Product</TableHead>
+										<TableHead>Merchant</TableHead>
+										<TableHead>Category</TableHead>
+										<TableHead>Price</TableHead>
+										<TableHead>Status</TableHead>
+										<TableHead className="text-right">Actions</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{filteredProducts.map((product) => (
+										<TableRow key={product.id}>
+											<TableCell>
+												<div className="flex items-center gap-3">
+													<div className="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
+														<Image
+															src={product.image_url}
+															alt={product.title}
+															fill
+															className="object-cover"
+															sizes="56px"
+														/>
+													</div>
+													<div className="min-w-0">
+														<p className="font-medium text-foreground line-clamp-1">
+															{product.title}
+														</p>
+														<p className="text-xs text-muted-foreground">
+															{product.brand_name} • SKU: {product.sku}
+														</p>
+														{product.raw_vendor &&
+															product.raw_vendor !== product.brand_name && (
+																<p className="text-xs text-warning">
+																	Original vendor: {product.raw_vendor}
+																</p>
+															)}
+													</div>
+												</div>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-2">
+													<Store className="h-4 w-4 text-muted-foreground" />
+													<span className="text-sm text-foreground">
+														{product.merchant_name}
+													</span>
+												</div>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-2">
+													<Tag className="h-4 w-4 text-muted-foreground" />
+													<span className="text-sm text-foreground">
+														{product.category_name ||
+															product.raw_product_type ||
+															"Uncategorized"}
+													</span>
+												</div>
+											</TableCell>
+											<TableCell>
+												<p className="font-medium text-foreground">
+													₹{product.base_price.toLocaleString()}
+												</p>
+											</TableCell>
+											<TableCell>
+												<StatusBadge
+													status="pending"
+													customLabel="Pending Review"
+												/>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center justify-end gap-2">
+													<Button
+														variant="ghost"
+														size="icon-sm"
+														onClick={() => handleOpenReview(product)}
+														title="Review Details"
+													>
+														<Eye className="h-4 w-4" />
+													</Button>
+													<Button
+														variant="success"
+														size="sm"
+														onClick={() => handleQuickApprove(product)}
+														leftIcon={<Check className="h-4 w-4" />}
+													>
+														Approve
+													</Button>
+													<Button
+														variant="destructive"
+														size="sm"
+														onClick={() => handleOpenReject(product)}
+														leftIcon={<X className="h-4 w-4" />}
+													>
+														Reject
+													</Button>
+												</div>
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</div>
+					)}
+				</Card>
+
+				{/* Review Modal */}
+				{selectedProduct && (
+					<ReviewModal
+						open={reviewModalOpen}
+						onOpenChange={setReviewModalOpen}
+						product={selectedProduct}
+						brands={brands ?? []}
+						categories={categories ?? []}
+						onApprove={handleApproveSuccess}
+						onReject={() => {
+							setReviewModalOpen(false);
+							setRejectModalOpen(true);
+						}}
+					/>
+				)}
+
+				{/* Reject Modal */}
+				{selectedProduct && (
+					<RejectModal
+						open={rejectModalOpen}
+						onOpenChange={setRejectModalOpen}
+						product={selectedProduct}
+						onSuccess={handleRejectSuccess}
+					/>
+				)}
+			</Container>
+		</PageWrapper>
+	);
 }
 
+// Review Modal Component
 function ReviewModal({
-  product,
-  onClose,
-  onApprove,
-  onReject,
+	open,
+	onOpenChange,
+	product,
+	brands,
+	categories,
+	onApprove,
+	onReject,
 }: {
-  product: ApiProduct;
-  onClose: () => void;
-  onApprove: (id: number) => void;
-  onReject: (id: number) => void;
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	product: ApiProduct;
+	brands: ApiBrand[];
+	categories: ApiCategory[];
+	onApprove: () => void;
+	onReject: () => void;
 }) {
-  const [editTitle, setEditTitle] = useState(product.title);
-  const [selectedBrandId, setSelectedBrandId] = useState(product.brand_id ?? 0);
-  const [selectedBrandName, setSelectedBrandName] = useState(product.brand_name);
-  const [selectedCategorySlug, setSelectedCategorySlug] = useState(product.category_slug ?? "");
-  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState<number | null>(null);
-  const [brandSearchOpen, setBrandSearchOpen] = useState(false);
-  const [brandSearch, setBrandSearch] = useState("");
-  const [approving, setApproving] = useState(false);
-  const [rejecting, setRejecting] = useState(false);
+	const [editTitle, setEditTitle] = React.useState(product.title);
+	const [selectedBrandId, setSelectedBrandId] = React.useState(
+		String(product.brand_id ?? ""),
+	);
+	const [selectedCategoryId, setSelectedCategoryId] = React.useState(
+		String(product.category_id ?? ""),
+	);
+	const [isApproving, setIsApproving] = React.useState(false);
+	const [brandSearch, setBrandSearch] = React.useState("");
 
-  const { data: brands } = useSWR<ApiBrand[]>("/api/brands", fetcher);
-  const { data: categories } = useSWR<ApiCategory[]>("/api/categories", fetcher);
+	const topCategories = categories.filter((c) => c.parent_id === null);
+	const selectedCategory = topCategories.find(
+		(c) => String(c.id) === selectedCategoryId,
+	);
 
-  const topCategories = categories?.filter((c) => c.parent_id === null) ?? [];
-  const allBrands = brands ?? [];
+	const filteredBrands = React.useMemo(() => {
+		if (!brandSearch) return brands;
+		return brands.filter((b) =>
+			b.name.toLowerCase().includes(brandSearch.toLowerCase()),
+		);
+	}, [brands, brandSearch]);
 
-  const filteredBrands = allBrands.filter((b) =>
-    b.name.toLowerCase().includes(brandSearch.toLowerCase())
-  );
+	const handleApprove = async () => {
+		setIsApproving(true);
+		try {
+			const res = await fetch(`/api/admin/review/${product.id}`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					action: "approve",
+					title: editTitle,
+					brand_id: selectedBrandId ? Number(selectedBrandId) : undefined,
+					category_id: selectedCategoryId
+						? Number(selectedCategoryId)
+						: undefined,
+				}),
+			});
+			if (!res.ok) throw new Error("Failed to approve");
+			onApprove();
+		} catch {
+			toast.error("Failed to approve product");
+		}
+		setIsApproving(false);
+	};
 
-  const selectedCategoryObj = topCategories.find((c) => c.slug === selectedCategorySlug);
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent size="lg" className="max-h-[90vh] overflow-y-auto">
+				<DialogHeader>
+					<DialogTitle>Review Product</DialogTitle>
+					<DialogDescription>
+						Review and optionally edit product details before approval.
+					</DialogDescription>
+				</DialogHeader>
 
-  const handleApprove = async () => {
-    setApproving(true);
-    try {
-      await fetch(`/api/admin/review/${product.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "approve",
-          title: editTitle,
-          brand_id: selectedBrandId,
-          category_id: selectedSubCategoryId ?? selectedCategoryObj?.id,
-        }),
-      });
-      onApprove(product.id);
-    } catch {
-      // handle error
-    }
-    setApproving(false);
-  };
+				<div className="mt-4 space-y-6">
+					{/* Product Preview */}
+					<div className="flex gap-4 rounded-lg border border-border bg-muted/30 p-4">
+						<div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
+							<Image
+								src={product.image_url}
+								alt={product.title}
+								fill
+								className="object-cover"
+								sizes="96px"
+							/>
+						</div>
+						<div className="min-w-0 flex-1">
+							<p className="font-semibold text-foreground">{product.title}</p>
+							<p className="text-sm text-muted-foreground">
+								SKU: {product.sku}
+							</p>
+							<p className="text-sm text-muted-foreground">
+								Merchant: {product.merchant_name}
+							</p>
+							<p className="mt-1 text-lg font-bold text-primary">
+								₹{product.base_price.toLocaleString()}
+							</p>
+						</div>
+					</div>
 
-  const handleReject = async () => {
-    setRejecting(true);
-    try {
-      await fetch(`/api/admin/review/${product.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reject" }),
-      });
-      onReject(product.id);
-    } catch {
-      // handle error
-    }
-    setRejecting(false);
-  };
+					{/* Original Data */}
+					<div>
+						<h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+							<div className="flex h-5 w-5 items-center justify-center rounded bg-muted text-xs font-bold">
+								1
+							</div>
+							Original Data from Source
+						</h4>
+						<div className="grid gap-4 rounded-lg border border-border bg-muted/50 p-4 sm:grid-cols-2">
+							<div>
+								<p className="text-xs font-medium text-muted-foreground">
+									Title
+								</p>
+								<p className="mt-1 text-sm text-foreground">
+									{product.raw_title ?? product.title}
+								</p>
+							</div>
+							<div>
+								<p className="text-xs font-medium text-muted-foreground">
+									Vendor
+								</p>
+								<p className="mt-1 text-sm text-foreground">
+									{product.raw_vendor ?? "Not specified"}
+								</p>
+							</div>
+							<div>
+								<p className="text-xs font-medium text-muted-foreground">
+									Product Type
+								</p>
+								<p className="mt-1 text-sm text-foreground">
+									{product.raw_product_type ?? "Not specified"}
+								</p>
+							</div>
+							<div>
+								<p className="text-xs font-medium text-muted-foreground">
+									Current Brand
+								</p>
+								<p className="mt-1 text-sm text-foreground">
+									{product.brand_name ?? "Not mapped"}
+								</p>
+							</div>
+						</div>
+					</div>
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-end bg-foreground/40 backdrop-blur-sm">
-      <div className="flex h-full w-full max-w-2xl flex-col bg-card shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-bold text-foreground">Review Product</h2>
-          <button
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
+					{/* Master Catalog Mapping */}
+					<div>
+						<h4 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+							<div className="flex h-5 w-5 items-center justify-center rounded bg-primary text-xs font-bold text-primary-foreground">
+								2
+							</div>
+							Master Catalog Mapping
+						</h4>
+						<div className="space-y-4 rounded-lg border border-primary/20 bg-accent/30 p-4">
+							{/* Title */}
+							<div>
+								<label
+									htmlFor="edit-title"
+									className="mb-1.5 block text-sm font-medium text-foreground"
+								>
+									Product Title
+								</label>
+								<Input
+									id="edit-title"
+									value={editTitle}
+									onChange={(e) => setEditTitle(e.target.value)}
+									placeholder="Enter product title"
+								/>
+							</div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Product Preview */}
-          <div className="mb-6 flex items-start gap-4">
-            <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-              <Image src={product.image_url} alt={product.title} fill className="object-cover" sizes="80px" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">{product.title}</p>
-              <p className="text-xs text-muted-foreground">SKU: {product.sku}</p>
-              <p className="text-xs text-muted-foreground">INR {product.base_price.toLocaleString()}</p>
-            </div>
-          </div>
+							{/* Brand */}
+							<div>
+								<label className="mb-1.5 block text-sm font-medium text-foreground">
+									Brand Mapping
+								</label>
+								<Select
+									value={selectedBrandId}
+									onValueChange={setSelectedBrandId}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Select brand..." />
+									</SelectTrigger>
+									<SelectContent>
+										<div className="p-2">
+											<Input
+												placeholder="Search brands..."
+												value={brandSearch}
+												onChange={(e) => setBrandSearch(e.target.value)}
+												inputSize="sm"
+											/>
+										</div>
+										<div className="max-h-[200px] overflow-y-auto">
+											{filteredBrands.map((brand) => (
+												<SelectItem key={brand.id} value={String(brand.id)}>
+													{brand.name}
+												</SelectItem>
+											))}
+										</div>
+									</SelectContent>
+								</Select>
+								{product.raw_vendor && (
+									<p className="mt-1 text-xs text-muted-foreground">
+										Original vendor:{" "}
+										<span className="text-foreground">
+											{product.raw_vendor}
+										</span>
+									</p>
+								)}
+							</div>
 
-          {/* Original Data (Read-only) */}
-          <div className="mb-6">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <span className="flex h-5 w-5 items-center justify-center rounded bg-muted text-xs font-bold text-muted-foreground">1</span>
-              Original Data from Shopify
-            </h3>
-            <div className="rounded-lg border border-border bg-muted/50 p-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Title</p>
-                  <p className="mt-1 text-sm text-foreground">{product.raw_title ?? product.title}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Vendor</p>
-                  <p className="mt-1 text-sm text-foreground">{product.raw_vendor ?? product.merchant_name}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Brand</p>
-                  <p className="mt-1 text-sm text-foreground">{product.brand_name}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Category</p>
-                  <p className="mt-1 text-sm capitalize text-foreground">{product.raw_product_type ?? product.category_name}</p>
-                </div>
-              </div>
-            </div>
-          </div>
+							{/* Category */}
+							<div>
+								<label className="mb-1.5 block text-sm font-medium text-foreground">
+									Category
+								</label>
+								<Select
+									value={selectedCategoryId}
+									onValueChange={setSelectedCategoryId}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Select category..." />
+									</SelectTrigger>
+									<SelectContent>
+										{topCategories.map((cat) => (
+											<SelectItem key={cat.id} value={String(cat.id)}>
+												{cat.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 
-          {/* Master Catalog Data (Editable) */}
-          <div>
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
-              <span className="flex h-5 w-5 items-center justify-center rounded bg-primary text-xs font-bold text-primary-foreground">2</span>
-              Master Catalog Data
-            </h3>
-            <div className="flex flex-col gap-4 rounded-lg border border-primary/20 bg-accent/30 p-4">
-              {/* Title */}
-              <div>
-                <label htmlFor="edit-title" className="mb-1.5 block text-xs font-medium text-foreground">Title</label>
-                <input
-                  id="edit-title"
-                  type="text"
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
+								{/* Sub-category */}
+								{selectedCategory?.children &&
+									selectedCategory.children.length > 0 && (
+										<div className="mt-3">
+											<label className="mb-1.5 block text-xs text-muted-foreground">
+												Sub-category (optional)
+											</label>
+											<Select>
+												<SelectTrigger size="sm">
+													<SelectValue placeholder="Select sub-category..." />
+												</SelectTrigger>
+												<SelectContent>
+													{selectedCategory.children.map((sub) => (
+														<SelectItem key={sub.id} value={String(sub.id)}>
+															{sub.name}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+							</div>
+						</div>
+					</div>
+				</div>
 
-              {/* Brand Selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-foreground">Brand Mapping</label>
-                <div className="relative">
-                  <button
-                    onClick={() => setBrandSearchOpen(!brandSearchOpen)}
-                    className="flex w-full items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-muted"
-                  >
-                    <span>{selectedBrandName || "Select brand..."}</span>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  </button>
-                  {brandSearchOpen && (
-                    <div className="absolute left-0 top-full z-10 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
-                      <div className="border-b border-border p-2">
-                        <div className="relative">
-                          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                          <input
-                            type="text"
-                            value={brandSearch}
-                            onChange={(e) => setBrandSearch(e.target.value)}
-                            placeholder="Search brands..."
-                            className="w-full rounded-md border border-border bg-muted py-1.5 pl-8 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-                            autoFocus
-                          />
-                        </div>
-                      </div>
-                      <div className="max-h-48 overflow-y-auto p-1">
-                        {filteredBrands.map((brand) => (
-                          <button
-                            key={brand.id}
-                            onClick={() => {
-                              setSelectedBrandId(brand.id);
-                              setSelectedBrandName(brand.name);
-                              setBrandSearchOpen(false);
-                              setBrandSearch("");
-                            }}
-                            className={`flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors hover:bg-muted ${
-                              selectedBrandId === brand.id ? "bg-accent font-medium text-accent-foreground" : "text-foreground"
-                            }`}
-                          >
-                            {brand.name}
-                            {selectedBrandId === brand.id && <Check className="h-4 w-4 text-primary" />}
-                          </button>
-                        ))}
-                        {filteredBrands.length === 0 && (
-                          <p className="px-3 py-2 text-sm text-muted-foreground">No brands found</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {product.raw_vendor && product.raw_vendor !== selectedBrandName && (
-                  <p className="mt-1 text-xs text-primary">
-                    Mapping &quot;{product.raw_vendor}&quot; to &quot;{selectedBrandName}&quot;
-                  </p>
-                )}
-              </div>
+				<DialogFooter className="mt-6">
+					<Button variant="outline" onClick={() => onOpenChange(false)}>
+						Cancel
+					</Button>
+					<Button
+						variant="destructive"
+						onClick={onReject}
+						leftIcon={<X className="h-4 w-4" />}
+					>
+						Reject
+					</Button>
+					<Button
+						variant="success"
+						onClick={handleApprove}
+						isLoading={isApproving}
+						leftIcon={<Check className="h-4 w-4" />}
+					>
+						Approve
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
 
-              {/* Category Selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-foreground">Category</label>
-                <div className="flex flex-col gap-2">
-                  <select
-                    value={selectedCategorySlug}
-                    onChange={(e) => {
-                      setSelectedCategorySlug(e.target.value);
-                      setSelectedSubCategoryId(null);
-                    }}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="">Select category...</option>
-                    {topCategories.map((cat) => (
-                      <option key={cat.id} value={cat.slug}>{cat.name}</option>
-                    ))}
-                  </select>
+// Reject Modal Component
+function RejectModal({
+	open,
+	onOpenChange,
+	product,
+	onSuccess,
+}: {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	product: ApiProduct;
+	onSuccess: () => void;
+}) {
+	const [selectedReason, setSelectedReason] = React.useState("");
+	const [customReason, setCustomReason] = React.useState("");
+	const [isRejecting, setIsRejecting] = React.useState(false);
 
-                  {selectedCategoryObj?.children && selectedCategoryObj.children.length > 0 && (
-                    <div className="ml-4">
-                      <label className="mb-1 block text-xs text-muted-foreground">Sub-category</label>
-                      <select
-                        value={selectedSubCategoryId ?? ""}
-                        onChange={(e) => setSelectedSubCategoryId(e.target.value ? Number(e.target.value) : null)}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                      >
-                        <option value="">Select sub-category...</option>
-                        {selectedCategoryObj.children.map((sub) => (
-                          <option key={sub.id} value={sub.id}>{sub.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+	const selectedReasonLabel = REJECTION_REASONS.find(
+		(r) => r.value === selectedReason,
+	)?.label;
+	const isOtherReason = selectedReason === "other";
+	const finalReason = isOtherReason
+		? customReason
+		: selectedReasonLabel || selectedReason;
+	const canSubmit = selectedReason && (!isOtherReason || customReason.trim());
 
-        {/* Footer Actions */}
-        <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-4">
-          <button
-            onClick={handleReject}
-            disabled={rejecting || approving}
-            className="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2.5 text-sm font-semibold text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-50"
-          >
-            {rejecting ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-destructive-foreground border-t-transparent" />
-            ) : (
-              <X className="h-4 w-4" />
-            )}
-            Reject
-          </button>
-          <button
-            onClick={handleApprove}
-            disabled={approving || rejecting}
-            className="flex items-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-semibold text-success-foreground transition-colors hover:bg-success/90 disabled:opacity-50"
-          >
-            {approving ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-success-foreground border-t-transparent" />
-            ) : (
-              <Check className="h-4 w-4" />
-            )}
-            Approve
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+	const handleReject = async () => {
+		if (!canSubmit) return;
+		setIsRejecting(true);
+		try {
+			const res = await fetch(`/api/admin/review/${product.id}`, {
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					action: "reject",
+					rejection_reason: finalReason,
+				}),
+			});
+			if (!res.ok) throw new Error("Failed to reject");
+			onSuccess();
+		} catch {
+			toast.error("Failed to reject product");
+		}
+		setIsRejecting(false);
+	};
+
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent size="default">
+				<DialogHeader>
+					<DialogTitle className="flex items-center gap-2 text-destructive">
+						<AlertTriangle className="h-5 w-5" />
+						Reject Product
+					</DialogTitle>
+					<DialogDescription>
+						Please provide a reason for rejection. This will be shared with the
+						merchant so they can make necessary corrections.
+					</DialogDescription>
+				</DialogHeader>
+
+				<div className="mt-4 space-y-4">
+					{/* Product Info */}
+					<div className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 p-3">
+						<div className="relative h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
+							<Image
+								src={product.image_url}
+								alt={product.title}
+								fill
+								className="object-cover"
+								sizes="48px"
+							/>
+						</div>
+						<div className="min-w-0 flex-1">
+							<p className="font-medium text-foreground line-clamp-1">
+								{product.title}
+							</p>
+							<p className="text-xs text-muted-foreground">
+								{product.merchant_name} • ₹{product.base_price.toLocaleString()}
+							</p>
+						</div>
+					</div>
+
+					{/* Rejection Reason Selector */}
+					<div>
+						<label className="mb-1.5 block text-sm font-medium text-foreground">
+							Rejection Reason <span className="text-destructive">*</span>
+						</label>
+						<Select value={selectedReason} onValueChange={setSelectedReason}>
+							<SelectTrigger variant={!selectedReason ? "error" : "default"}>
+								<SelectValue placeholder="Select a reason..." />
+							</SelectTrigger>
+							<SelectContent>
+								{REJECTION_REASONS.map((reason) => (
+									<SelectItem key={reason.value} value={reason.value}>
+										{reason.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+
+					{/* Custom Reason Input */}
+					{isOtherReason && (
+						<div>
+							<label className="mb-1.5 block text-sm font-medium text-foreground">
+								Specify Reason <span className="text-destructive">*</span>
+							</label>
+							<Textarea
+								value={customReason}
+								onChange={(e) => setCustomReason(e.target.value)}
+								placeholder="Please provide a detailed reason for rejection..."
+								variant={!customReason.trim() ? "error" : "default"}
+								showCount
+								maxLength={500}
+							/>
+						</div>
+					)}
+
+					{/* Additional Notes */}
+					{selectedReason && !isOtherReason && (
+						<div>
+							<label className="mb-1.5 block text-sm font-medium text-foreground">
+								Additional Notes (Optional)
+							</label>
+							<Textarea
+								value={customReason}
+								onChange={(e) => setCustomReason(e.target.value)}
+								placeholder="Add any additional context or suggestions..."
+								showCount
+								maxLength={500}
+							/>
+						</div>
+					)}
+
+					{/* Preview */}
+					{canSubmit && (
+						<div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+							<p className="text-xs font-medium text-warning">
+								Rejection message to merchant:
+							</p>
+							<p className="mt-1 text-sm text-foreground">
+								{finalReason}
+								{customReason && !isOtherReason && (
+									<>
+										<br />
+										<span className="text-muted-foreground">
+											Note: {customReason}
+										</span>
+									</>
+								)}
+							</p>
+						</div>
+					)}
+				</div>
+
+				<DialogFooter className="mt-6">
+					<Button variant="outline" onClick={() => onOpenChange(false)}>
+						Cancel
+					</Button>
+					<Button
+						variant="destructive"
+						onClick={handleReject}
+						isLoading={isRejecting}
+						disabled={!canSubmit}
+						leftIcon={<XCircle className="h-4 w-4" />}
+					>
+						Confirm Rejection
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
 }
