@@ -47,7 +47,7 @@ interface ShopifyProduct {
   image: ShopifyImage | null;
 }
 
-// POST /api/merchants/:merchantId/sync - Sync products from Shopify
+// POST /api/merchants/:merchantId/sync - Sync products from Shopify to STAGING
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ merchantId: string }> }
@@ -120,7 +120,6 @@ export async function POST(
 
     let recordsProcessed = 0;
     let recordsFailed = 0;
-    const syncedProducts: number[] = [];
 
     for (const shopifyProduct of shopifyProducts) {
       try {
@@ -128,18 +127,20 @@ export async function POST(
         const existingStaging = (await db
           .prepare(
             `
-          SELECT id FROM staging_products 
+          SELECT id, status FROM staging_products 
           WHERE merchant_id = ? AND external_product_id = ?
         `
           )
           .get(merchantIdNum, String(shopifyProduct.id))) as
-          | { id: number }
+          | { id: number; status: string }
           | undefined;
 
         let stagingProductId: number;
 
         if (existingStaging) {
-          // Update existing staging product
+          // If rejected, reset to PENDING_SYNC for resubmission
+          const newStatus = existingStaging.status === 'REJECTED' ? 'PENDING_SYNC' : existingStaging.status;
+          
           await db
             .prepare(
               `
@@ -150,6 +151,7 @@ export async function POST(
               raw_product_type = ?,
               raw_tags = ?,
               raw_json_dump = ?,
+              status = ?,
               updated_at = NOW()
             WHERE id = ?
           `
@@ -161,6 +163,7 @@ export async function POST(
               shopifyProduct.product_type,
               shopifyProduct.tags,
               JSON.stringify(shopifyProduct),
+              newStatus,
               existingStaging.id
             );
           stagingProductId = existingStaging.id;
@@ -173,7 +176,7 @@ export async function POST(
               merchant_id, external_product_id, raw_title, raw_body_html, 
               raw_vendor, raw_product_type, raw_tags, raw_json_dump, status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'NEEDS_REVIEW')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING_SYNC')
             RETURNING id
           `
             )
@@ -190,107 +193,8 @@ export async function POST(
           stagingProductId = stagingResult.lastInsertRowid ?? 0;
         }
 
-        // 2. Check if master product exists (by external_product_id via merchant_offers)
-        const existingProduct = (await db
-          .prepare(
-            `
-          SELECT DISTINCT p.id FROM products p
-          JOIN variants v ON v.product_id = p.id
-          JOIN merchant_offers mo ON mo.variant_id = v.id
-          WHERE mo.merchant_id = ? AND mo.external_product_id = ?
-        `
-          )
-          .get(merchantIdNum, String(shopifyProduct.id))) as
-          | { id: number }
-          | undefined;
-
-        let productId: number;
-        const slug = `${shopifyProduct.handle}-${merchantIdNum}-${Date.now()}`;
-        const basePrice = Math.round(
-          parseFloat(shopifyProduct.variants[0]?.price || "0") * 100
-        );
-        const imageUrl =
-          shopifyProduct.image?.src ||
-          shopifyProduct.images[0]?.src ||
-          "https://placehold.co/400x400?text=No+Image";
-
-        if (existingProduct) {
-          // Update existing product
-          await db
-            .prepare(
-              `
-            UPDATE products SET
-              title = ?,
-              description = ?,
-              image_url = ?,
-              base_price = ?,
-              updated_at = NOW()
-            WHERE id = ?
-          `
-            )
-            .run(
-              shopifyProduct.title,
-              shopifyProduct.body_html || "",
-              imageUrl,
-              basePrice,
-              existingProduct.id
-            );
-          productId = existingProduct.id;
-        } else {
-          // Create new master product
-          const productResult = await db
-            .prepare(
-              `
-            INSERT INTO products (title, slug, description, image_url, base_price, rating, review_count, status)
-            VALUES (?, ?, ?, ?, ?, 0, 0, 'ACTIVE')
-            RETURNING id
-          `
-            )
-            .run(
-              shopifyProduct.title,
-              slug,
-              shopifyProduct.body_html || "",
-              imageUrl,
-              basePrice
-            );
-          productId = productResult.lastInsertRowid ?? 0;
-
-          // Link to default category (can be updated during review)
-          await db
-            .prepare(
-              `
-            INSERT INTO product_categories (product_id, category_id)
-            SELECT ?, id FROM categories WHERE parent_id IS NULL LIMIT 1
-          `
-            )
-            .run(productId);
-        }
-
-        // 3. Sync product images to media table
-        for (const image of shopifyProduct.images) {
-          const existingMedia = (await db
-            .prepare(
-              `
-            SELECT id FROM media WHERE product_id = ? AND src_url = ?
-          `
-            )
-            .get(productId, image.src)) as { id: number } | undefined;
-
-          if (!existingMedia) {
-            await db
-              .prepare(
-                `
-              INSERT INTO media (product_id, src_url, alt_text, position)
-              VALUES (?, ?, ?, ?)
-            `
-              )
-              .run(productId, image.src, image.alt || "", image.position);
-          }
-        }
-
-        // 4. Sync variants
+        // 2. Sync variants to staging_variants
         for (const shopifyVariant of shopifyProduct.variants) {
-          // Upsert staging_variant
           const existingStagingVariant = (await db
             .prepare(
               `
@@ -322,7 +226,8 @@ export async function POST(
                 raw_sku = ?,
                 raw_barcode = ?,
                 raw_price = ?,
-                raw_options = ?
+                raw_options = ?,
+                status = 'PENDING_SYNC'
               WHERE id = ?
             `
               )
@@ -340,7 +245,7 @@ export async function POST(
               INSERT INTO staging_variants (
                 staging_product_id, external_variant_id, raw_sku, raw_barcode, raw_price, raw_options, status
               )
-              VALUES (?, ?, ?, ?, ?, ?, 'PENDING')
+              VALUES (?, ?, ?, ?, ?, ?, 'PENDING_SYNC')
             `
               )
               .run(
@@ -352,116 +257,8 @@ export async function POST(
                 JSON.stringify(options)
               );
           }
-
-          // Check if master variant exists
-          const internalSku =
-            shopifyVariant.sku ||
-            `${merchantIdNum}-${shopifyProduct.id}-${shopifyVariant.id}`;
-          const existingVariant = (await db
-            .prepare(
-              `
-            SELECT v.id FROM variants v
-            JOIN merchant_offers mo ON mo.variant_id = v.id
-            WHERE mo.merchant_id = ? AND mo.external_variant_id = ?
-          `
-            )
-            .get(merchantIdNum, String(shopifyVariant.id))) as
-            | { id: number }
-            | undefined;
-
-          let variantId: number;
-          const priceMinor = Math.round(parseFloat(shopifyVariant.price) * 100);
-          const settlementPriceMinor = Math.round(priceMinor * 0.95); // 5% margin
-
-          if (existingVariant) {
-            // Update existing variant
-            await db
-              .prepare(
-                `
-              UPDATE variants SET
-                gtin = ?,
-                weight_grams = ?,
-                attributes = ?,
-                updated_at = NOW()
-              WHERE id = ?
-            `
-              )
-              .run(
-                shopifyVariant.barcode || null,
-                shopifyVariant.grams || null,
-                JSON.stringify(options),
-                existingVariant.id
-              );
-            variantId = existingVariant.id;
-
-            // Update merchant offer
-            await db
-              .prepare(
-                `
-              UPDATE merchant_offers SET
-                cached_price_minor = ?,
-                cached_settlement_price_minor = ?,
-                current_stock = ?,
-                merchant_sku = ?,
-                last_synced_at = NOW(),
-                updated_at = NOW()
-              WHERE merchant_id = ? AND variant_id = ?
-            `
-              )
-              .run(
-                priceMinor,
-                settlementPriceMinor,
-                shopifyVariant.inventory_quantity || 0,
-                shopifyVariant.sku || internalSku,
-                merchantIdNum,
-                variantId
-              );
-          } else {
-            // Create new variant with unique SKU
-            const uniqueSku = `${internalSku}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-            const variantResult = await db
-              .prepare(
-                `
-              INSERT INTO variants (product_id, internal_sku, gtin, weight_grams, attributes, is_active)
-              VALUES (?, ?, ?, ?, ?, true)
-              RETURNING id
-            `
-              )
-              .run(
-                productId,
-                uniqueSku,
-                shopifyVariant.barcode || null,
-                shopifyVariant.grams || null,
-                JSON.stringify(options)
-              );
-            variantId = variantResult.lastInsertRowid ?? 0;
-
-            // Create merchant offer (PENDING_REVIEW for new products)
-            await db
-              .prepare(
-                `
-              INSERT INTO merchant_offers (
-                merchant_id, variant_id, external_product_id, external_variant_id,
-                merchant_sku, currency_code, cached_price_minor, cached_settlement_price_minor,
-                current_stock, offer_status, is_active, last_synced_at
-              )
-              VALUES (?, ?, ?, ?, ?, 'INR', ?, ?, ?, 'PENDING_REVIEW', true, NOW())
-            `
-              )
-              .run(
-                merchantIdNum,
-                variantId,
-                String(shopifyProduct.id),
-                String(shopifyVariant.id),
-                shopifyVariant.sku || uniqueSku,
-                priceMinor,
-                settlementPriceMinor,
-                shopifyVariant.inventory_quantity || 0
-              );
-          }
         }
 
-        syncedProducts.push(productId);
         recordsProcessed++;
       } catch (productError) {
         console.error(
@@ -471,6 +268,11 @@ export async function POST(
         recordsFailed++;
       }
     }
+
+    // Trigger Matcher (internal call or background task simulation)
+    // For this implementation, we'll run the matcher logic directly or via a simple fetch
+    // But since it's a small app, we can just process matches here for simplicity
+    await runMatcher(merchantIdNum);
 
     // Update sync log
     const finalStatus =
@@ -496,7 +298,7 @@ export async function POST(
         finalStatus,
         recordsProcessed,
         recordsFailed,
-        `Synced ${recordsProcessed} products, ${recordsFailed} failed`,
+        `Synced ${recordsProcessed} products to staging`,
         syncLogId
       );
 
@@ -505,7 +307,6 @@ export async function POST(
       syncLogId,
       recordsProcessed,
       recordsFailed,
-      productIds: syncedProducts,
     });
   } catch (error) {
     console.error("POST /api/merchants/:id/sync error:", error);
@@ -513,5 +314,56 @@ export async function POST(
       { error: "Internal server error" },
       { status: 500 }
     );
+  }
+}
+
+async function runMatcher(merchantId: number) {
+  const db = getDb();
+  
+  // 1. Get all pending staging products
+  const pending = await db.prepare(`
+    SELECT id, raw_title FROM staging_products 
+    WHERE merchant_id = ? AND status = 'PENDING_SYNC'
+  `).all() as { id: number; raw_title: string }[];
+
+  for (const sp of pending) {
+    let suggestedId = null;
+    let confidence = 0;
+
+    // 2. Barcode Match (Variants)
+    const barcodeMatch = await db.prepare(`
+      SELECT p.id FROM products p
+      JOIN variants v ON v.product_id = p.id
+      JOIN staging_variants sv ON sv.raw_barcode = v.gtin
+      WHERE sv.staging_product_id = ? AND v.gtin IS NOT NULL
+      LIMIT 1
+    `).get(sp.id) as { id: number } | undefined;
+
+    if (barcodeMatch) {
+      suggestedId = barcodeMatch.id;
+      confidence = 100;
+    } else {
+      // 3. Title fuzzy match
+      const titleMatch = await db.prepare(`
+        SELECT id, similarity(title, ?) as score
+        FROM products
+        WHERE similarity(title, ?) > 0.4
+        ORDER BY score DESC
+        LIMIT 1
+      `).get(sp.raw_title, sp.raw_title) as { id: number; score: number } | undefined;
+
+      if (titleMatch && titleMatch.score > 0.8) {
+        suggestedId = titleMatch.id;
+        confidence = Math.round(titleMatch.score * 100);
+      }
+    }
+
+    await db.prepare(`
+      UPDATE staging_products SET
+        suggested_product_id = ?,
+        match_confidence_score = ?,
+        status = 'NEEDS_REVIEW'
+      WHERE id = ?
+    `).run(suggestedId, confidence, sp.id);
   }
 }

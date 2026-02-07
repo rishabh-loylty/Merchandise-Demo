@@ -4,6 +4,7 @@ import { useGlobal } from "@/context/global-context";
 import { fetcher } from "@/lib/fetcher";
 import type { ApiProduct } from "@/lib/types";
 import {
+  AlertTriangle,
   Box,
   CheckCircle2,
   Clock,
@@ -27,6 +28,7 @@ export default function MerchantDashboardPage() {
     : null;
 
   const { data: products, isLoading, mutate } = useSWR<ApiProduct[]>(apiUrl, fetcher);
+  const { data: issues } = useSWR(merchantSession ? `/api/merchants/${merchantSession.id}/issues` : null, fetcher);
 
   useEffect(() => {
     if (!merchantSession) {
@@ -50,6 +52,16 @@ export default function MerchantDashboardPage() {
     setSyncing(false);
   };
 
+  const handleResync = async (issueId: number) => {
+    if (!merchantSession) return;
+    try {
+      await fetch(`/api/merchants/${merchantSession.id}/products/${issueId}/resync`, { method: "POST" });
+      // mutate issues list
+    } catch {
+      // handle error
+    }
+  };
+
   if (!merchantSession) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -59,8 +71,10 @@ export default function MerchantDashboardPage() {
   }
 
   const productList = products ?? [];
+  const issueList = issues ?? [];
   const liveCount = productList.filter((p) => p.offer_status === "LIVE").length;
   const pendingCount = productList.filter((p) => p.offer_status === "PENDING_REVIEW").length;
+  const issuesCount = issueList.length;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -83,7 +97,7 @@ export default function MerchantDashboardPage() {
       </div>
 
       {/* Stats */}
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-4">
         <div className="rounded-xl border border-border bg-card p-6">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent">
@@ -117,7 +131,52 @@ export default function MerchantDashboardPage() {
             </div>
           </div>
         </div>
+        <div className="rounded-xl border border-border bg-card p-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Listing Issues</p>
+              <p className="text-2xl font-bold text-foreground">{issuesCount}</p>
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* Issues Table */}
+      {issuesCount > 0 && (
+        <div className="mb-8 rounded-xl border border-destructive/20 bg-destructive/5 shadow-sm">
+          <div className="flex items-center justify-between border-b border-destructive/10 px-6 py-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Required Actions
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <tbody className="divide-y divide-destructive/10">
+                {issueList.map((issue: any) => (
+                  <tr key={issue.id}>
+                    <td className="px-6 py-4">
+                      <p className="text-sm font-medium text-foreground">{issue.title}</p>
+                      <p className="text-xs text-destructive">Reason: {issue.rejection_reason}</p>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => handleResync(issue.id)}
+                        className="text-sm font-medium text-primary hover:underline"
+                      >
+                        I fixed it on Shopify
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Product Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm">
