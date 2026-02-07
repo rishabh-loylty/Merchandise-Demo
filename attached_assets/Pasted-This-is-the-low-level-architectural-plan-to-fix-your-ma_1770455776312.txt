@@ -1,0 +1,136 @@
+This is the low-level architectural plan to fix your marketplace synchronization. It focuses on separating the **Ingestion Layer** (Staging) from the **Presentation Layer** (Master Catalog) and establishing a strict state machine for data flow.
+
+### 1. Database Schema Refinements
+You do not need many new tables, but you need to add "Decision Support" columns to your existing `staging` tables. Run these migrations to support the matching and review process.
+
+```sql
+-- 1. Enable fuzzy matching extension for title comparison
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- 2. Enhance Staging Products to store "Match" data
+ALTER TABLE staging_products
+ADD COLUMN suggested_product_id integer REFERENCES products(id), -- If our algorithm finds a match
+ADD COLUMN match_confidence_score integer DEFAULT 0, -- 0-100 score
+ADD COLUMN admin_notes text; -- Internal notes for admins
+
+-- 3. Enhance Staging Variants to store "Link" data
+ALTER TABLE staging_variants
+ADD COLUMN suggested_variant_id integer REFERENCES variants(id);
+
+-- 4. Create a Type for the State Machine (Strict enforcement)
+CREATE TYPE review_status AS ENUM (
+  'PENDING_SYNC',   -- Just arrived from Shopify
+  'PROCESSING',     -- Matcher script is running
+  'NEEDS_REVIEW',   -- Matcher finished, waiting for Human
+  'APPROVED',       -- Human said Yes
+  'REJECTED',       -- Human said No
+  'ARCHIVED'        -- Merchant deleted it or it's old
+);
+
+-- Update the status columns to use this logic (conceptually, or via check constraints)
+```
+
+---
+
+### 2. The Logic Flow (The Pipeline)
+
+This is the exact sequence of events that must happen.
+
+#### Phase A: Ingestion (The Sync API)
+*Current Mistake:* You are writing to `products` immediately.
+*New Logic:*
+1.  **Receive Data:** Fetch JSON from Shopify.
+2.  **Upsert Staging:** Look for existing `staging_products` by `external_product_id`.
+    *   *If Exists & Status is REJECTED:* Update raw data, reset status to `PENDING_SYNC` (This solves the "User has no way to resubmit" issue. The act of syncing *is* the resubmission).
+    *   *If Exists & Status is LIVE:* Update raw data. If critical fields (images/title) changed significantly, flag a "Content Alert" (optional advanced feature), otherwise just update price/stock in `merchant_offers` directly.
+    *   *If New:* Insert into `staging_products` with status `PENDING_SYNC`.
+3.  **Trigger Matcher:** Fire an event (or call a function) to run Phase B.
+
+#### Phase B: The Auto-Matcher (The Intelligence)
+*This runs in the background immediately after Phase A.*
+1.  **Select:** Get all `staging_products` where status = `PENDING_SYNC`.
+2.  **Barcode Match (High Confidence):**
+    *   Loop through variants. Check if `staging_variants.raw_barcode` exists in `variants.gtin`.
+    *   If found: Set `staging_products.suggested_product_id` to the parent of that variant. Set `match_confidence_score = 100`.
+3.  **Title Match (Medium Confidence):**
+    *   If no barcode match, perform a fuzzy text search on `products.title` vs `staging_products.raw_title`.
+    *   If similarity > 80%: Set `suggested_product_id`. Set `match_confidence_score = 80`.
+4.  **Completion:** Update status to `NEEDS_REVIEW`.
+
+#### Phase C: The Admin Review (The Decision)
+*The Review API (`PATCH /api/admin/review/:id`) needs to handle three distinct scenarios.*
+
+**Scenario 1: Approve as New (Create)**
+*   **Input:** Admin clicks "Create New Product".
+*   **Action:**
+    1.  Insert new row into `products` (using `staging_products.raw_*` data).
+    2.  Insert new rows into `variants`.
+    3.  Insert row into `merchant_offers` linking Merchant to the new Variants.
+    4.  Update `staging_products` status to `APPROVED`.
+
+**Scenario 2: Approve as Match (Link)**
+*   **Input:** Admin confirms "Yes, this matches iPhone 13 (ID: 55)".
+*   **Action:**
+    1.  **Do NOT** create a new Product.
+    2.  Check if `variants` exist for the specific attributes (Color/Size).
+        *   *If yes:* Link `merchant_offers` to existing `variant_id`.
+        *   *If no:* Create new `variants` under the **existing** `product_id`.
+    3.  Update `staging_products` status to `APPROVED`.
+
+**Scenario 3: Reject**
+*   **Input:** Admin selects "Low Quality Images".
+*   **Action:**
+    1.  Update `staging_products` status to `REJECTED`.
+    2.  Update `staging_products` rejection_reason to "Poor Images".
+    3.  **Do NOT** touch `products` or `merchant_offers`.
+
+---
+
+### 3. The Merchant Feedback Loop (The Missing Piece)
+
+You need to build these specific endpoints to close the loop.
+
+#### 1. The "Fix It" List
+**Endpoint:** `GET /api/merchant/products/issues`
+**Query:**
+```sql
+SELECT 
+  sp.id, 
+  sp.raw_title, 
+  sp.rejection_reason, 
+  sp.updated_at as rejected_at
+FROM staging_products sp
+WHERE sp.merchant_id = ? AND sp.status = 'REJECTED'
+```
+
+#### 2. The Resubmission Trigger
+**Endpoint:** `POST /api/merchant/products/:id/resync`
+**Logic:**
+1.  Merchant fixes issue on Shopify.
+2.  Merchant clicks "I Fixed It" on your dashboard.
+3.  Your server calls Shopify API *for that specific product ID*.
+4.  Update `staging_products` with new JSON.
+5.  **Crucial:** Set `status = 'PENDING_SYNC'` (or directly to `NEEDS_REVIEW`).
+6.  This puts it back in the Admin's queue.
+
+---
+
+### 4. Summary of Architecture Changes
+
+| Feature | Old Architecture | New Architecture |
+| :--- | :--- | :--- |
+| **Syncing** | Writes directly to Master DB | Writes to Staging DB only |
+| **Matching** | Non-existent (creates duplicates) | Async process scanning Barcodes/Titles |
+| **Review State** | `offer_status` (mixed with live data) | `staging_products.status` (clean separation) |
+| **Rejection** | Dead end (stored in DB, user unaware) | Appears in Merchant "Issues" tab |
+| **Correction** | No clear path | "Fix on Shopify -> Resync" loop |
+
+### 5. Implementation Roadmap (Order of Operations)
+
+1.  **Stop the Bleeding:** Modify the `POST /sync` endpoint to **only** write to `staging_products` and `staging_variants`. Comment out the logic that writes to `products`.
+2.  **Migration:** Clear out `staging_products` (or backfill statuses) to ensure clean state.
+3.  **Build Phase B (Matcher):** Create a simple script (or Next.js API route cron) that matches Staging items to Master items and fills the `suggested_product_id` column.
+4.  **Update Admin UI:** Change the Review page to read from `staging_products` instead of `products`.
+    *   *Left column:* Staging Data.
+    *   *Right column:* Master Data (if `suggested_product_id` is present) OR "New Product Form".
+5.  **Build Merchant UI:** Create the "Listing Issues" page so they can see rejections.
