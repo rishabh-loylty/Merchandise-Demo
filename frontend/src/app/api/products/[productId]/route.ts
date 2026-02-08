@@ -2,6 +2,28 @@ import { getDb } from "@/lib/db";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+// Helper to extract unique option groups from variants (e.g. Color, Size)
+function extractOptionGroups(variants: { attributes?: unknown }[]): { name: string; values: string[] }[] {
+  const groups: Record<string, Set<string>> = {};
+
+  variants.forEach((v) => {
+    const attrs = v.attributes;
+    if (!attrs || typeof attrs !== "object" || Array.isArray(attrs)) return;
+    const obj = attrs as Record<string, unknown>;
+    if (Object.keys(obj).length === 0) return;
+
+    Object.entries(obj).forEach(([key, value]) => {
+      if (!groups[key]) groups[key] = new Set();
+      groups[key].add(String(value));
+    });
+  });
+
+  return Object.entries(groups).map(([name, values]) => ({
+    name,
+    values: Array.from(values),
+  }));
+}
+
 // GET /api/products/:productId - Get single product with full details
 export async function GET(
   _request: NextRequest,
@@ -48,16 +70,19 @@ export async function GET(
     `).all(id);
 
     const normalizedVariants = variants.map((variant) => {
-      const attributes = variant.attributes;
-      if (typeof attributes === "string") {
+      let attrs = variant.attributes;
+      if (typeof attrs === "string") {
         try {
-          return { ...variant, attributes: JSON.parse(attributes) };
+          attrs = JSON.parse(attrs);
         } catch {
-          return variant;
+          attrs = {};
         }
       }
-      return variant;
+      if (attrs == null) attrs = {};
+      return { ...variant, attributes: attrs };
     });
+
+    const available_options = extractOptionGroups(normalizedVariants);
 
     const offers = await db.prepare(`
       SELECT
@@ -71,10 +96,34 @@ export async function GET(
       ORDER BY m.name
     `).all(id);
 
-    return NextResponse.json({
+    // Normalize numeric fields (DB may return strings for numeric/decimal types)
+    const toNum = (x: unknown): number =>
+      typeof x === "number" ? x : typeof x === "string" ? parseFloat(x) || 0 : 0;
+    const toInt = (x: unknown): number =>
+      typeof x === "number" ? x : typeof x === "string" ? parseInt(x, 10) || 0 : 0;
+
+    const productPayload = {
       ...product,
+      base_price: toNum(product.base_price),
+      rating: toNum(product.rating),
+      review_count: toInt(product.review_count),
+      cached_price_minor: toNum(product.cached_price_minor),
+      current_stock: toInt(product.current_stock),
+    };
+
+    const offersPayload = (offers as { cached_price_minor?: unknown; current_stock?: unknown }[]).map(
+      (o) => ({
+        ...o,
+        cached_price_minor: toNum(o.cached_price_minor),
+        current_stock: toInt(o.current_stock),
+      })
+    );
+
+    return NextResponse.json({
+      ...productPayload,
       variants: normalizedVariants,
-      offers,
+      available_options,
+      offers: offersPayload,
     });
   } catch (error) {
     console.error("GET /api/products/:id error:", error);

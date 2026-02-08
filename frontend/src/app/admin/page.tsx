@@ -55,10 +55,45 @@ interface DashboardStats {
 	totalCategories: number;
 }
 
+// Staging item from GET /api/admin/review (not ApiProduct)
+interface StagingReviewItem {
+	staging_id: number;
+	merchant_id: number;
+	title: string;
+	vendor: string | null;
+	product_type: string | null;
+	raw_json_dump: Record<string, unknown> | string | null;
+	merchant_name: string;
+}
+
+function getStagingImageUrl(dump: Record<string, unknown> | string | null): string | null {
+	if (dump == null) return null;
+	try {
+		const raw = typeof dump === "string" ? (JSON.parse(dump) as Record<string, unknown>) : dump;
+		const img = raw?.image as { src?: string } | undefined;
+		const imgs = raw?.images as { src?: string }[] | undefined;
+		return (img?.src as string) ?? (imgs?.[0]?.src as string) ?? null;
+	} catch {
+		return null;
+	}
+}
+
+function getStagingPrice(dump: Record<string, unknown> | string | null): string | null {
+	if (dump == null) return null;
+	try {
+		const raw = typeof dump === "string" ? (JSON.parse(dump) as Record<string, unknown>) : dump;
+		const variants = raw?.variants as { price?: string }[] | undefined;
+		const first = variants?.[0]?.price;
+		return typeof first === "string" ? first : null;
+	} catch {
+		return null;
+	}
+}
+
 export default function AdminDashboardPage() {
 	// Fetch data for dashboard
 	const { data: pendingProducts, isLoading: loadingPending } = useSWR<
-		ApiProduct[]
+		StagingReviewItem[]
 	>("/api/admin/review", fetcher);
 	const { data: merchants, isLoading: loadingMerchants } = useSWR<
 		ApiMerchant[]
@@ -93,7 +128,7 @@ export default function AdminDashboardPage() {
 		totalCategories: categories?.length ?? 0,
 	};
 
-	// Recent pending items (top 5)
+	// Recent pending items (top 5) — from staging review API
 	const recentPending = pendingProducts?.slice(0, 5) ?? [];
 
 	// Quick actions
@@ -321,42 +356,52 @@ export default function AdminDashboardPage() {
 											</TableRow>
 										</TableHeader>
 										<TableBody>
-											{recentPending.map((product) => (
-												<TableRow key={product.id}>
-													<TableCell>
-														<div className="flex items-center gap-3">
-															<div className="h-10 w-10 overflow-hidden rounded-lg bg-muted">
-																<img
-																	src={product.image_url}
-																	alt={product.title}
-																	className="h-full w-full object-cover"
-																/>
+											{recentPending.map((product) => {
+												const imageUrl = getStagingImageUrl(product.raw_json_dump);
+												const priceStr = getStagingPrice(product.raw_json_dump);
+												return (
+													<TableRow key={product.staging_id}>
+														<TableCell>
+															<div className="flex items-center gap-3">
+																<div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg bg-muted">
+																	{imageUrl ? (
+																		<img
+																			src={imageUrl}
+																			alt={product.title}
+																			className="h-full w-full object-cover"
+																		/>
+																	) : (
+																		<div className="flex h-full w-full items-center justify-center text-muted-foreground">
+																			<Package className="h-5 w-5" />
+																		</div>
+																	)}
+																</div>
+																<div>
+																	<p className="text-sm font-medium text-foreground line-clamp-1">
+																		{product.title}
+																	</p>
+																	<p className="text-xs text-muted-foreground">
+																		{product.vendor ?? "—"}
+																	</p>
+																</div>
 															</div>
-															<div>
-																<p className="text-sm font-medium text-foreground line-clamp-1">
-																	{product.title}
-																</p>
-																<p className="text-xs text-muted-foreground">
-																	{product.brand_name}
-																</p>
-															</div>
-														</div>
-													</TableCell>
-													<TableCell className="text-sm text-muted-foreground">
-														{product.merchant_name}
-													</TableCell>
-													<TableCell className="text-sm font-medium text-foreground">
-														₹{product.base_price.toLocaleString()}
-													</TableCell>
-													<TableCell className="text-right">
-														<Button variant="outline" size="sm" asChild>
-															<Link href={`/admin/review?id=${product.id}`}>
-																Review
-															</Link>
-														</Button>
-													</TableCell>
-												</TableRow>
-											))}
+														</TableCell>
+														<TableCell className="text-sm text-muted-foreground">
+															{product.merchant_name}
+														</TableCell>
+														<TableCell className="text-sm font-medium text-foreground">
+															{priceStr != null ? `₹${Number(priceStr).toLocaleString()}` : "—"}
+														</TableCell>
+														<TableCell className="text-right">
+															<Button variant="outline" size="sm" asChild>
+																<Link href={`/admin/review?stagingId=${product.staging_id}`}>
+																	Review
+																</Link>
+															</Button>
+														</TableCell>
+													</TableRow>
+												);
+											})}
 										</TableBody>
 									</Table>
 								</div>

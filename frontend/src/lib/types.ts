@@ -34,9 +34,10 @@ export interface ApiProduct {
     internal_sku: string;
     attributes?: Record<string, unknown> | null;
     is_active?: boolean;
-    stock: number;
-    price: number;
+    stock?: number;
+    price?: number;
   }>;
+  available_options?: Array<{ name: string; values: string[] }>;
   offers?: Array<{
     id: number;
     merchant_id: number;

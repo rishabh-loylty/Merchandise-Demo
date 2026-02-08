@@ -11,7 +11,9 @@
     "check": "biome check .",
     "check:write": "biome check --write .",
     "typecheck": "tsc --noEmit",
-    "seed:neon": "node --env-file .env scripts/seed-neon.mjs"
+    "seed:neon": "node --env-file .env scripts/seed-neon.mjs",
+    "migrate:review": "node --env-file .env scripts/migrate-review-schema.mjs",
+    "migrate:matching": "node --env-file .env scripts/migrate-matching-v2.mjs"
   },
   "dependencies": {
     "@heroui/react": "^2.8.8",

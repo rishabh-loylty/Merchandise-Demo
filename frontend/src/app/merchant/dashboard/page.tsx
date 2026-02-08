@@ -18,6 +18,17 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 
+interface StagingItem {
+  id: number;
+  title: string;
+  vendor: string | null;
+  product_type: string | null;
+  status: string;
+  match_confidence_score: number | null;
+  created_at: string;
+  image_url: string | null;
+}
+
 export default function MerchantDashboardPage() {
   const { merchantSession } = useGlobal();
   const router = useRouter();
@@ -28,7 +39,14 @@ export default function MerchantDashboardPage() {
     : null;
 
   const { data: products, isLoading, mutate } = useSWR<ApiProduct[]>(apiUrl, fetcher);
-  const { data: issues } = useSWR(merchantSession ? `/api/merchants/${merchantSession.id}/issues` : null, fetcher);
+  const { data: stagingProducts, mutate: mutateStaging } = useSWR<StagingItem[]>(
+    merchantSession ? `/api/merchants/${merchantSession.id}/staging` : null,
+    fetcher
+  );
+  const { data: issues, mutate: mutateIssues } = useSWR(
+    merchantSession ? `/api/merchants/${merchantSession.id}/issues` : null,
+    fetcher
+  );
 
   useEffect(() => {
     if (!merchantSession) {
@@ -45,7 +63,8 @@ export default function MerchantDashboardPage() {
     setSyncing(true);
     try {
       await fetch(`/api/merchants/${merchantSession.id}/sync`, { method: "POST" });
-      mutate(); // Refresh products list from API
+      mutate();
+      mutateStaging();
     } catch {
       // handle error silently
     }
@@ -55,8 +74,8 @@ export default function MerchantDashboardPage() {
   const handleResync = async (issueId: number) => {
     if (!merchantSession) return;
     try {
-      await fetch(`/api/merchants/${merchantSession.id}/products/${issueId}/resync`, { method: "POST" });
-      // mutate issues list
+      const res = await fetch(`/api/merchants/${merchantSession.id}/products/${issueId}/resync`, { method: "POST" });
+      if (res.ok) mutateIssues();
     } catch {
       // handle error
     }
@@ -71,10 +90,12 @@ export default function MerchantDashboardPage() {
   }
 
   const productList = products ?? [];
+  const stagingList = stagingProducts ?? [];
   const issueList = issues ?? [];
   const liveCount = productList.filter((p) => p.offer_status === "LIVE").length;
-  const pendingCount = productList.filter((p) => p.offer_status === "PENDING_REVIEW").length;
+  const pendingReviewCount = stagingList.length;
   const issuesCount = issueList.length;
+  const totalCount = liveCount + pendingReviewCount;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -87,6 +108,7 @@ export default function MerchantDashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">Welcome back, {merchantSession.name}</p>
         </div>
         <button
+          type="button"
           onClick={handleSync}
           disabled={syncing}
           className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
@@ -105,7 +127,7 @@ export default function MerchantDashboardPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Total Products</p>
-              <p className="text-2xl font-bold text-foreground">{productList.length}</p>
+              <p className="text-2xl font-bold text-foreground">{totalCount}</p>
             </div>
           </div>
         </div>
@@ -127,7 +149,7 @@ export default function MerchantDashboardPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Pending Review</p>
-              <p className="text-2xl font-bold text-foreground">{pendingCount}</p>
+              <p className="text-2xl font-bold text-foreground">{pendingReviewCount}</p>
             </div>
           </div>
         </div>
@@ -144,6 +166,62 @@ export default function MerchantDashboardPage() {
         </div>
       </div>
 
+      {/* Under Review Table */}
+      {pendingReviewCount > 0 && (
+        <div className="mb-8 rounded-xl border border-warning/30 bg-warning/5 shadow-sm">
+          <div className="flex items-center justify-between border-b border-warning/10 px-6 py-4">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-warning">
+              <Clock className="h-5 w-5" />
+              Under Review ({pendingReviewCount})
+            </h2>
+            <p className="text-sm text-muted-foreground">Waiting for marketplace approval</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Product</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Vendor / Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Submitted</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {stagingList.map((item) => (
+                  <tr key={item.id} className="hover:bg-muted/30">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
+                          {item.image_url ? (
+                            <Image src={item.image_url} alt="" fill className="object-cover" sizes="40px" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                              <Package className="h-5 w-5" />
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-sm font-medium text-foreground">{item.title}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">
+                      {[item.vendor, item.product_type].filter(Boolean).join(" • ") || "—"}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">
+                      {new Date(item.created_at).toLocaleDateString(undefined, { dateStyle: "medium" })}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex items-center rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">
+                        Under review
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Issues Table */}
       {issuesCount > 0 && (
         <div className="mb-8 rounded-xl border border-destructive/20 bg-destructive/5 shadow-sm">
@@ -152,6 +230,9 @@ export default function MerchantDashboardPage() {
               <AlertTriangle className="h-5 w-5" />
               Required Actions
             </h2>
+            <Link href="/merchant/issues" className="text-sm font-medium text-primary hover:underline">
+              View all issues
+            </Link>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -163,7 +244,8 @@ export default function MerchantDashboardPage() {
                       <p className="text-xs text-destructive">Reason: {issue.rejection_reason}</p>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button 
+                      <button
+                        type="button"
                         onClick={() => handleResync(issue.id)}
                         className="text-sm font-medium text-primary hover:underline"
                       >
@@ -178,10 +260,10 @@ export default function MerchantDashboardPage() {
         </div>
       )}
 
-      {/* Product Table */}
+      {/* Live Products Table */}
       <div className="rounded-xl border border-border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">Your Products</h2>
+          <h2 className="text-lg font-semibold text-foreground">Live on Marketplace</h2>
           <Link href="/merchant/products" className="text-sm font-medium text-primary hover:underline">
             View All
           </Link>
@@ -194,16 +276,25 @@ export default function MerchantDashboardPage() {
         ) : productList.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Box className="mb-4 h-12 w-12 text-muted-foreground" />
-            <h3 className="mb-2 text-lg font-semibold text-foreground">No products yet</h3>
-            <p className="mb-4 text-sm text-muted-foreground">Sync your Shopify store to import products</p>
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Sync Now
-            </button>
+            <h3 className="mb-2 text-lg font-semibold text-foreground">
+              {pendingReviewCount > 0 ? "No live products yet" : "No products yet"}
+            </h3>
+            <p className="mb-4 text-sm text-muted-foreground">
+              {pendingReviewCount > 0
+                ? "Approved products will appear here. Items under review are listed above."
+                : "Sync your Shopify store to import products."}
+            </p>
+            {pendingReviewCount === 0 && (
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncing}
+                className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Sync Now
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">

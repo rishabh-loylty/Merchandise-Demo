@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState, useMemo } from "react";
 import useSWR from "swr";
+import { cn } from "@/lib/utils";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -41,7 +42,7 @@ export default function ProductDetailPage() {
 
   // --- State ---
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
   const [selectedOfferId, setSelectedOfferId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [isDescExpanded, setIsDescExpanded] = useState(false);
@@ -49,61 +50,55 @@ export default function ProductDetailPage() {
 
   const relatedProducts = (relatedRaw ?? []).filter((p) => p.id !== product?.id).slice(0, 4);
   const variants = product?.variants ?? [];
+  const options = product?.available_options ?? [];
   const allOffers = product?.offers ?? [];
   const hasVariants = variants.length > 0;
 
-  // --- Logic 1: Initialize Selection (Smart Auto-Select) ---
-  useEffect(() => {
-    const firstVariant = variants[0];
-    if (product && firstVariant) {
-      // 1. Find the first variant that has stock > 0
-      const inStockVariant = variants.find(v => v.stock > 0);
-      // 2. If all are OOS, just pick the first one
-      const targetVariantId = inStockVariant ? inStockVariant.id : firstVariant.id;
-      
-      setSelectedVariantId(targetVariantId);
-      setQuantity(1);
-      setRedeemState("idle");
-    }
-  }, [product, variants]);
+  // --- Logic 1: Resolve active variant from selected options (Size, Color, etc.) ---
+  const activeVariant = useMemo(() => {
+    if (variants.length === 0) return null;
+    if (options.length === 0) return variants[0];
+    return variants.find((v) => {
+      const attrs = (v.attributes ?? {}) as Record<string, string>;
+      return Object.entries(selectedOptions).every(([key, value]) => attrs[key] === value);
+    }) ?? null;
+  }, [variants, selectedOptions, options.length]);
 
-  // --- Logic 2: Filter Offers based on Selected Variant ---
-  // We assume the API 'offers' have a 'variant_id' or matches the 'sku'
-  // If your API is flat, you might need to adjust this filter condition.
+  // --- Logic 2: Auto-select default options from first variant ---
+  useEffect(() => {
+    if (options.length > 0 && Object.keys(selectedOptions).length === 0) {
+      const first = variants[0];
+      const attrs = (first?.attributes ?? {}) as Record<string, string>;
+      if (Object.keys(attrs).length > 0) {
+        setSelectedOptions(attrs);
+      }
+    }
+  }, [options.length, variants]);
+
+  // --- Logic 3: Filter offers by active variant ---
   const filteredOffers = useMemo(() => {
-    if (!hasVariants) return allOffers;
-    return allOffers.filter(offer => offer.variant_id === selectedVariantId);
-  }, [allOffers, selectedVariantId, hasVariants]);
+    if (!activeVariant) return [];
+    return allOffers.filter((o) => o.variant_id === activeVariant.id);
+  }, [allOffers, activeVariant]);
 
   // Reset selected offer when variant changes
   useEffect(() => {
     if (filteredOffers.length > 0) {
-      // Default to the first offer (usually best price) or the one with stock
-      const inStockOffer = filteredOffers.find(o => o.current_stock > 0);
-      setSelectedOfferId(inStockOffer ? inStockOffer.id : filteredOffers?.[0]?.id ?? null);
+      const inStockOffer = filteredOffers.find((o) => o.current_stock > 0);
+      setSelectedOfferId(inStockOffer ? inStockOffer.id : filteredOffers[0]?.id ?? null);
     } else {
       setSelectedOfferId(null);
     }
-  }, [selectedVariantId, filteredOffers]);
+  }, [activeVariant?.id, filteredOffers]);
 
-  // --- Logic 3: Derived Calculation ---
-  const activeVariant = variants.find((v) => v.id === selectedVariantId);
   const activeOffer = filteredOffers.find((o) => o.id === selectedOfferId);
-
-  // Determine Stock: 
-  // If offers exist, stock is specific to the selected merchant.
-  // If no offers (direct sell), use variant stock.
-  const currentStock = activeOffer 
-    ? activeOffer.current_stock 
-    : (activeVariant?.stock ?? 0);
-
+  const currentStock = activeOffer ? activeOffer.current_stock : 0;
   const isOutOfStock = currentStock <= 0;
 
-  // Price Calculation
-  const basePrice = activeVariant?.price ?? product?.base_price ?? 0;
-  const priceInCurrency = activeOffer 
-    ? (activeOffer.cached_price_minor / 100) 
-    : basePrice;
+  // Price: from selected offer or product base (base_price is in minor/cents in DB; adjust if your schema differs)
+  const priceInCurrency = activeOffer
+    ? activeOffer.cached_price_minor / 100
+    : (product?.base_price != null ? product.base_price / 100 : 0);
 
   const rate = selectedBank?.points_to_currency_rate ?? 0.25;
   const pointsPerItem = Math.ceil(priceInCurrency / rate);
@@ -183,43 +178,60 @@ export default function ProductDetailPage() {
             {/* SELECTION AREA */}
             <div className="space-y-6">
               
-              {/* 1. Variants Selection */}
-              {hasVariants && (
-                <div>
-                  <h3 className="mb-3 text-sm font-medium text-foreground">Select Variant</h3>
-                  <div className="flex flex-wrap gap-3">
-                    {variants.map((variant) => {
-                      const isActive = selectedVariantId === variant.id;
-                      // Check if this specific variant has ANY stock globally (sum of its offers or base stock)
-                      const isVariantOOS = variant.stock <= 0; 
-                      
-                      return (
-                        <button
-                          key={variant.id}
-                          onClick={() => setSelectedVariantId(variant.id)}
-                          className={`
-                            relative min-w-[4rem] rounded-lg border px-4 py-2 text-sm font-medium transition-all
-                            ${isActive 
-                                ? "border-primary bg-primary text-primary-foreground ring-2 ring-primary/20" 
-                                : "border-border bg-background hover:border-primary/50 text-foreground"}
-                            ${isVariantOOS && !isActive ? "opacity-50 grayscale" : ""}
-                          `}
-                        >
-                          {variant.internal_sku}
-                          {/* Visual indicator for OOS variants */}
-                          {isVariantOOS && (
-                            <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[10px] text-muted-foreground shadow-sm">
-                                x
-                            </span>
+              {/* 1. Option matrix (Size, Color, etc.) — Amazon-style */}
+              {options.length > 0 ? (
+                <div className="space-y-4">
+                  {options.map((optionGroup) => {
+                    const currentValue = selectedOptions[optionGroup.name];
+                    return (
+                      <div key={optionGroup.name}>
+                        <h3 className="mb-2 text-sm font-medium text-foreground">
+                          Select {optionGroup.name}
+                          {currentValue && (
+                            <span className="ml-2 text-muted-foreground">: {currentValue}</span>
                           )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                        </h3>
+                        <div className="flex flex-wrap gap-3">
+                          {optionGroup.values.map((value) => {
+                            const isSelected = currentValue === value;
+                            const isValid = variants.some((v) => {
+                              const attrs = (v.attributes ?? {}) as Record<string, string>;
+                              return attrs[optionGroup.name] === value &&
+                                Object.entries(selectedOptions).every(([k, v]) =>
+                                  k === optionGroup.name ? true : attrs[k] === v
+                                );
+                            });
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() =>
+                                  setSelectedOptions((prev) => ({ ...prev, [optionGroup.name]: value }))
+                                }
+                                disabled={!isValid}
+                                className={cn(
+                                  "min-w-12 rounded-lg border px-4 py-2 text-sm font-medium transition-all",
+                                  isSelected
+                                    ? "border-primary bg-primary text-primary-foreground ring-2 ring-primary/20"
+                                    : "border-border bg-background hover:border-primary/50 text-foreground",
+                                  !isValid &&
+                                    "cursor-not-allowed opacity-50 bg-muted text-muted-foreground line-through"
+                                )}
+                              >
+                                {value}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              ) : hasVariants ? (
+                <div className="text-sm text-muted-foreground">Standard edition</div>
+              ) : null}
 
-              {/* 2. Merchants (Offers) - FILTERED by current Variant */}
+              {/* 2. Merchants (Offers) — filtered by selected variant */}
               <div>
                 <h3 className="mb-3 text-sm font-medium text-foreground">Available Sellers</h3>
                 
@@ -277,7 +289,7 @@ export default function ProductDetailPage() {
                     >
                         <Minus className="h-4 w-4" />
                     </button>
-                    <span className="min-w-[3rem] text-center font-semibold text-foreground">{quantity}</span>
+                    <span className="min-w-12 text-center font-semibold text-foreground">{quantity}</span>
                     <button 
                         onClick={() => handleQuantityChange(1)}
                         disabled={quantity >= currentStock || isOutOfStock}

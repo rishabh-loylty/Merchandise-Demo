@@ -324,7 +324,7 @@ async function runMatcher(merchantId: number) {
   const pending = await db.prepare(`
     SELECT id, raw_title FROM staging_products 
     WHERE merchant_id = ? AND status = 'PENDING_SYNC'
-  `).all() as { id: number; raw_title: string }[];
+  `).all(merchantId) as { id: number; raw_title: string }[];
 
   for (const sp of pending) {
     let suggestedId = null;
@@ -334,7 +334,7 @@ async function runMatcher(merchantId: number) {
     const barcodeMatch = await db.prepare(`
       SELECT p.id FROM products p
       JOIN variants v ON v.product_id = p.id
-      JOIN staging_variants sv ON sv.raw_barcode = v.gtin
+    JOIN staging_variants sv ON sv.raw_barcode = v.gtin
       WHERE sv.staging_product_id = ? AND v.gtin IS NOT NULL
       LIMIT 1
     `).get(sp.id) as { id: number } | undefined;
