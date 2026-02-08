@@ -78,3 +78,16 @@ export interface ApiMerchant {
   is_active: boolean;
   created_at: string;
 }
+
+
+export interface Merchant {
+  id: number;
+  name: string;
+  email: string;
+  sourceType: "SHOPIFY";
+  sourceConfig: string;
+  isActive: boolean;
+  shopifyConfigured: boolean;
+  createdAt: string; // ISO date string
+  updatedAt: string; // ISO date string
+}

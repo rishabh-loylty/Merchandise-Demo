@@ -1,8 +1,8 @@
 "use client";
 
-import { useGlobal, type MerchantSession } from "@/context/global-context";
-import { fetcher } from "@/lib/fetcher";
-import type { ApiMerchant } from "@/lib/types";
+import { useGlobal } from "@/context/global-context";
+import { apiClient } from "@/lib/api";
+import type { Merchant } from "@/lib/types";
 import { Building2, LogIn, UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -17,7 +17,7 @@ export default function MerchantPage() {
   const [registerEmail, setRegisterEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const { data: merchants, mutate } = useSWR<ApiMerchant[]>("/api/merchants", fetcher);
+  const { data: merchants, mutate } = useSWR<Merchant[]>("merchants", () => apiClient.getMerchants());
 
   useEffect(() => {
     if (merchantSession) {
@@ -44,7 +44,7 @@ export default function MerchantPage() {
         id: merchant.id,
         name: merchant.name,
         email: merchant.email,
-        shopify_configured: merchant.shopify_configured,
+        shopify_configured: merchant.shopifyConfigured,
       });
     }
   };
@@ -53,22 +53,16 @@ export default function MerchantPage() {
     if (!registerName.trim() || !registerEmail.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/merchants", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: registerName.trim(), email: registerEmail.trim() }),
+      const newMerchant = await apiClient.createMerchant({
+        name: registerName.trim(),
+        email: registerEmail.trim(),
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Failed to create account" }));
-        throw new Error(err.error || "Failed to create account");
-      }
-      const newMerchant: ApiMerchant = await res.json();
       mutate(); // Refresh merchants list
       setMerchantSession({
         id: newMerchant.id,
         name: newMerchant.name,
         email: newMerchant.email,
-        shopify_configured: newMerchant.shopify_configured,
+        shopify_configured: newMerchant.shopifyConfigured,
       });
     } catch {
       // Error state could be shown in UI if desired

@@ -18,8 +18,9 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .csrf(AbstractHttpConfigurer::disable) // Disable CSRF for stateless APIs
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/health").permitAll() // Allow public access to health check
