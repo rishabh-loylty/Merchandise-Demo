@@ -81,4 +81,63 @@ class MerchantControllerIntegrationTest {
                 .andExpect(jsonPath("$.sourceType", is("SHOPIFY"))) // Default from Entity
                 .andExpect(jsonPath("$.shopifyConfigured", is(false))); // Default from Entity
     }
+
+    @Test
+    void patchMerchant_ShouldUpdateProvidedFields_AndUpdatedAt() throws Exception {
+        // Arrange: Create a merchant
+        Merchant saved = merchantRepository.save(Merchant.builder()
+                .name("Old Name")
+                .email("patch@test.com")
+                .shopifyConfigured(false)
+                .sourceConfig("{}")
+                .isActive(true)
+                .build());
+
+        String merchantId = saved.getId().toString();
+        
+        String jsonRequest = """
+            {
+                "name": "New Name",
+                "shopify_configured": true,
+                "source_config": { "shopUrl": "test.myshopify.com" }
+            }
+        """;
+
+        // Act
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/merchants/" + merchantId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonRequest))
+                // Assert
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name", is("New Name")))
+                .andExpect(jsonPath("$.shopifyConfigured", is(true)))
+                // Verify DB update
+                .andDo(result -> {
+                    Merchant updated = merchantRepository.findById(saved.getId()).orElseThrow();
+                    org.junit.jupiter.api.Assertions.assertEquals("New Name", updated.getName());
+                    org.junit.jupiter.api.Assertions.assertTrue(updated.getShopifyConfigured());
+                    // Check if updateTimestamp changed
+                    org.junit.jupiter.api.Assertions.assertTrue(updated.getUpdatedAt().isAfter(saved.getCreatedAt()));
+                });
+    }
+
+    @Test
+    void patchMerchant_ShouldReturn404_WhenMerchantNotFound() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/merchants/99999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\": \"Ghost\"}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void patchMerchant_ShouldReturn400_WhenNoFieldsToUpdate() throws Exception {
+         // Arrange
+        Merchant saved = merchantRepository.save(Merchant.builder().name("Exists").email("e@e.com").build());
+
+        // Act: Empty JSON body
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/merchants/" + saved.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest());
+    }
 }

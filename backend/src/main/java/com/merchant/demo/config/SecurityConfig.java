@@ -24,7 +24,7 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable) // Disable CSRF for stateless APIs
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/health").permitAll() // Allow public access to health check
-                .requestMatchers("/api/merchants").permitAll() // Allow public access to merchants
+                .requestMatchers("/api/merchants/**").permitAll() // Allow public access to merchants
                 .anyRequest().authenticated() // Secure everything else
             );
 
