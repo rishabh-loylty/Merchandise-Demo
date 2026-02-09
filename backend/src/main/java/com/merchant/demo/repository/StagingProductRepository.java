@@ -2,16 +2,18 @@
 package com.merchant.demo.repository;
 
 import com.merchant.demo.entity.StagingProduct;
-
-import java.util.Optional;
-
 import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.Optional;
 
 public interface StagingProductRepository extends JpaRepository<StagingProduct, Integer> {
 
-    // Find specific product for a merchant
     Optional<StagingProduct> findByMerchantIdAndExternalProductId(Integer merchantId, String externalProductId);
-    
-    // Kept for utility, but we aren't using it in the smart sync anymore
+
     void deleteAllByMerchantId(Integer merchantId);
+
+    List<StagingProduct> findByMerchantIdOrderByCreatedAtDesc(Integer merchantId);
+
+    List<StagingProduct> findByMerchantIdAndStatusOrderByUpdatedAtDesc(Integer merchantId, String status);
 }

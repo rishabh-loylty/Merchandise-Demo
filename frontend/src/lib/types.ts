@@ -108,3 +108,42 @@ export interface UpdateMerchantResponse {
   createdAt: string; // ISO 8601 timestamp
   updatedAt: string; // ISO 8601 timestamp
 }
+
+// Merchant operations (staging / issues / stats)
+export interface StagingProductListItem {
+  id: number;
+  title: string;
+  vendor: string;
+  productType: string;
+  createdAt: string;
+  imageUrl: string | null;
+  status: string;
+}
+
+export interface IssueProduct {
+  id: number;
+  title: string;
+  vendor: string;
+  rejectedAt: string;
+  rejectionReason: string | null;
+  imageUrl: string | null;
+}
+
+export interface DashboardStats {
+  liveProducts: number;
+  underReview: number;
+  issues: number;
+  totalSkus: number;
+}
+
+// Public product (live catalog) - API may return snake_case
+export interface LiveProductItem {
+  id: number;
+  title: string;
+  sku: string;
+  brand_name: string;
+  merchant_name: string;
+  base_price: number;
+  offer_status: string;
+  image_url: string | null;
+}

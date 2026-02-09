@@ -1,11 +1,15 @@
 package com.merchant.demo.controller;
 
 import com.merchant.demo.dto.CreateMerchantRequest;
+import com.merchant.demo.dto.DashboardStatsDto;
+import com.merchant.demo.dto.IssueProductDto;
+import com.merchant.demo.dto.StagingProductListItemDto;
 import com.merchant.demo.dto.SyncResultDto;
 import com.merchant.demo.dto.UpdateMerchantRequest;
 import com.merchant.demo.entity.Merchant;
 import com.merchant.demo.service.MerchantService;
 import com.merchant.demo.service.ProductSyncService;
+import com.merchant.demo.service.StagingProductService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -23,6 +27,7 @@ public class MerchantController {
 
     private final MerchantService merchantService;
     private final ProductSyncService productSyncService;
+    private final StagingProductService stagingProductService;
 
     @GetMapping
     public ResponseEntity<List<Merchant>> getAllMerchants() {
@@ -66,6 +71,45 @@ public class MerchantController {
         } catch (Exception e) {
             // A generic catch-all for other potential issues during sync
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to sync products: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/{merchantId}/staging")
+    public ResponseEntity<List<StagingProductListItemDto>> getStaging(@PathVariable Integer merchantId) {
+        try {
+            return ResponseEntity.ok(stagingProductService.getStagingForMerchant(merchantId));
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @GetMapping("/{merchantId}/issues")
+    public ResponseEntity<List<IssueProductDto>> getIssues(@PathVariable Integer merchantId) {
+        try {
+            return ResponseEntity.ok(stagingProductService.getIssuesForMerchant(merchantId));
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @PostMapping("/{merchantId}/products/{stagingId}/resync")
+    public ResponseEntity<Void> resyncStagingProduct(
+            @PathVariable Integer merchantId,
+            @PathVariable Integer stagingId) {
+        try {
+            stagingProductService.resyncStagingProduct(merchantId, stagingId);
+            return ResponseEntity.ok().build();
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @GetMapping("/{merchantId}/stats")
+    public ResponseEntity<DashboardStatsDto> getStats(@PathVariable Integer merchantId) {
+        try {
+            return ResponseEntity.ok(stagingProductService.getStatsForMerchant(merchantId));
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
     }
 }

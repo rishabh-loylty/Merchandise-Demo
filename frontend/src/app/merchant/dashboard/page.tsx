@@ -1,343 +1,209 @@
 "use client";
 
 import { useGlobal } from "@/context/global-context";
-import { apiClient } from "@/lib/api";
-import { fetcher } from "@/lib/fetcher";
-import type { ApiProduct } from "@/lib/types";
+import { apiClient, apiFetcher } from "@/lib/api";
 import {
   AlertTriangle,
-  Box,
+  ArrowRight,
   CheckCircle2,
   Clock,
-  LayoutDashboard,
-  Package,
   RefreshCw,
+  ShoppingBag,
 } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import useSWR from "swr";
+import { useState } from "react";
+import useSWR, { mutate } from "swr";
 
-interface StagingItem {
-  id: number;
-  title: string;
-  vendor: string | null;
-  product_type: string | null;
-  status: string;
-  match_confidence_score: number | null;
-  created_at: string;
-  image_url: string | null;
-}
-
-export default function MerchantDashboardPage() {
+export default function DashboardPage() {
   const { merchantSession } = useGlobal();
-  const router = useRouter();
   const [syncing, setSyncing] = useState(false);
 
-  const apiUrl = merchantSession
-    ? `/api/products?status=all&merchantId=${merchantSession.id}`
-    : null;
-
-  const { data: products, isLoading, mutate } = useSWR<ApiProduct[]>(apiUrl, fetcher);
-  const { data: stagingProducts, mutate: mutateStaging } = useSWR<StagingItem[]>(
-    merchantSession ? `/api/merchants/${merchantSession.id}/staging` : null,
-    fetcher
+  const { data: stats } = useSWR(
+    merchantSession ? `/api/merchants/${merchantSession.id}/stats` : null,
+    apiFetcher
   );
-  const { data: issues, mutate: mutateIssues } = useSWR(
+
+  const { data: issues } = useSWR(
     merchantSession ? `/api/merchants/${merchantSession.id}/issues` : null,
-    fetcher
+    apiFetcher
   );
-
-  useEffect(() => {
-    if (!merchantSession) {
-      router.push("/merchant");
-      return;
-    }
-    if (!merchantSession.shopify_configured) {
-      router.push("/merchant/onboarding");
-    }
-  }, [merchantSession, router]);
 
   const handleSync = async () => {
     if (!merchantSession) return;
     setSyncing(true);
     try {
-      apiClient.syncMerchant(merchantSession.id.toString());
-      mutate();
-      mutateStaging();
-      mutateIssues();
-    } catch (error) {
-      console.error(error);
+      await apiClient.syncMerchant(merchantSession.id.toString());
+      await Promise.all([
+        mutate(`/api/merchants/${merchantSession.id}/stats`),
+        mutate(`/api/merchants/${merchantSession.id}/issues`),
+        mutate(`/api/merchants/${merchantSession.id}/staging`),
+      ]);
+    } catch (e) {
+      console.error(e);
     } finally {
       setSyncing(false);
     }
   };
 
-  const handleResync = async (issueId: number) => {
-    if (!merchantSession) return;
-    try {
-      const res = await fetch(`/api/merchants/${merchantSession.id}/products/${issueId}/resync`, { method: "POST" });
-      if (res.ok) mutateIssues();
-    } catch {
-      // handle error
-    }
-  };
-
-  if (!merchantSession) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-      </div>
-    );
-  }
-
-  const productList = products ?? [];
-  const stagingList = stagingProducts ?? [];
-  const issueList = issues ?? [];
-  const liveCount = productList.filter((p) => p.offer_status === "LIVE").length;
-  const pendingReviewCount = stagingList.length;
-  const issuesCount = issueList.length;
-  const totalCount = liveCount + pendingReviewCount;
+  const issuesCount = stats?.issues ?? issues?.length ?? 0;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-            <LayoutDashboard className="h-6 w-6 text-primary" />
-            Dashboard
+          <h1 className="text-3xl font-bold tracking-tight text-foreground">
+            Overview
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Welcome back, {merchantSession.name}</p>
+          <p className="text-muted-foreground">
+            Your catalog health at a glance.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={handleSync}
-          disabled={syncing}
-          className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-          {syncing ? "Syncing..." : "Sync Products"}
-        </button>
+        <div className="flex gap-3">
+          <Link
+             href="/merchant/settings"
+             className="inline-flex items-center justify-center rounded-lg border border-border bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+          >
+            Check Configuration
+          </Link>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing..." : "Sync Catalog"}
+          </button>
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-4">
-        <div className="rounded-xl border border-border bg-card p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent">
-              <Package className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Total Products</p>
-              <p className="text-2xl font-bold text-foreground">{totalCount}</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Live</p>
-              <p className="text-2xl font-bold text-foreground">{liveCount}</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
-              <Clock className="h-5 w-5 text-warning" />
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Pending Review</p>
-              <p className="text-2xl font-bold text-foreground">{pendingReviewCount}</p>
-            </div>
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
+      {/* Action Required Banner */}
+      {issuesCount > 0 && (
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+          <div className="flex items-start gap-4">
+            <div className="rounded-full bg-destructive/10 p-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
             </div>
+            <div className="flex-1">
+              <h3 className="font-semibold text-destructive">
+                {issuesCount} Products require attention
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Some imported products were rejected by the operations team.
+                Please review them to ensure they go live.
+              </p>
+            </div>
+            <Link
+              href="/merchant/products?tab=issues"
+              className="group flex items-center gap-1 text-sm font-medium text-destructive hover:underline"
+            >
+              Fix Issues <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Stats Grid */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="rounded-lg bg-success/10 p-3">
+              <CheckCircle2 className="h-6 w-6 text-success" />
+            </div>
             <div>
-              <p className="text-sm text-muted-foreground">Listing Issues</p>
-              <p className="text-2xl font-bold text-foreground">{issuesCount}</p>
+              <p className="text-sm font-medium text-muted-foreground">
+                Live Products
+              </p>
+              <h2 className="text-2xl font-bold text-foreground">
+                {stats?.liveProducts ?? "--"}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="rounded-lg bg-warning/10 p-3">
+              <Clock className="h-6 w-6 text-warning" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">
+                Under Review
+              </p>
+              <h2 className="text-2xl font-bold text-foreground">
+                {stats?.underReview ?? "--"}
+              </h2>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="rounded-lg bg-primary/10 p-3">
+              <ShoppingBag className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">
+                Total SKUs
+              </p>
+              <h2 className="text-2xl font-bold text-foreground">
+                {stats?.totalSkus ?? "--"}
+              </h2>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Under Review Table */}
-      {pendingReviewCount > 0 && (
-        <div className="mb-8 rounded-xl border border-warning/30 bg-warning/5 shadow-sm">
-          <div className="flex items-center justify-between border-b border-warning/10 px-6 py-4">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-warning">
-              <Clock className="h-5 w-5" />
-              Under Review ({pendingReviewCount})
-            </h2>
-            <p className="text-sm text-muted-foreground">Waiting for marketplace approval</p>
+      {/* Recent Activity / Steps Guide */}
+      <div className="rounded-xl border border-border bg-card p-6">
+        <h3 className="mb-4 text-lg font-semibold text-foreground">
+          Quick Guide
+        </h3>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+              1
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Manage in Shopify
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Create products, update prices, and change descriptions directly
+                in your Shopify admin panel.
+              </p>
+            </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Product</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Vendor / Type</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Submitted</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {stagingList.map((item) => (
-                  <tr key={item.id} className="hover:bg-muted/30">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-                          {item.image_url ? (
-                            <Image src={item.image_url} alt="" fill className="object-cover" sizes="40px" />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                              <Package className="h-5 w-5" />
-                            </div>
-                          )}
-                        </div>
-                        <span className="text-sm font-medium text-foreground">{item.title}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {[item.vendor, item.product_type].filter(Boolean).join(" • ") || "—"}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">
-                      {new Date(item.created_at).toLocaleDateString(undefined, { dateStyle: "medium" })}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">
-                        Under review
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="flex items-start gap-3">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+              2
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Sync to Marketplace
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Click the &quot;Sync Catalog&quot; button above. We will fetch your changes
+                and place them in the &quot;Under Review&quot; queue.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+              3
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Ops Approval
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Our team reviews images and descriptions. Once approved, items
+                go live instantly. If rejected, check the &quot;Needs Attention&quot;
+                tab.
+              </p>
+            </div>
           </div>
         </div>
-      )}
-
-      {/* Issues Table */}
-      {issuesCount > 0 && (
-        <div className="mb-8 rounded-xl border border-destructive/20 bg-destructive/5 shadow-sm">
-          <div className="flex items-center justify-between border-b border-destructive/10 px-6 py-4">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
-              <AlertTriangle className="h-5 w-5" />
-              Required Actions
-            </h2>
-            <Link href="/merchant/issues" className="text-sm font-medium text-primary hover:underline">
-              View all issues
-            </Link>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <tbody className="divide-y divide-destructive/10">
-                {issueList.map((issue: any) => (
-                  <tr key={issue.id}>
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-medium text-foreground">{issue.title}</p>
-                      <p className="text-xs text-destructive">Reason: {issue.rejection_reason}</p>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <button
-                        type="button"
-                        onClick={() => handleResync(issue.id)}
-                        className="text-sm font-medium text-primary hover:underline"
-                      >
-                        I fixed it on Shopify
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Live Products Table */}
-      <div className="rounded-xl border border-border bg-card shadow-sm">
-        <div className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h2 className="text-lg font-semibold text-foreground">Live on Marketplace</h2>
-          <Link href="/merchant/products" className="text-sm font-medium text-primary hover:underline">
-            View All
-          </Link>
-        </div>
-
-        {isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          </div>
-        ) : productList.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Box className="mb-4 h-12 w-12 text-muted-foreground" />
-            <h3 className="mb-2 text-lg font-semibold text-foreground">
-              {pendingReviewCount > 0 ? "No live products yet" : "No products yet"}
-            </h3>
-            <p className="mb-4 text-sm text-muted-foreground">
-              {pendingReviewCount > 0
-                ? "Approved products will appear here. Items under review are listed above."
-                : "Sync your Shopify store to import products."}
-            </p>
-            {pendingReviewCount === 0 && (
-              <button
-                type="button"
-                onClick={handleSync}
-                disabled={syncing}
-                className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Sync Now
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border bg-muted/50">
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Product</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">SKU</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Price</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {productList.slice(0, 10).map((product) => (
-                  <tr key={product.id} className="hover:bg-muted/30">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg bg-muted">
-                          <Image src={product.image_url} alt={product.title} fill className="object-cover" sizes="40px" />
-                        </div>
-                        <span className="text-sm font-medium text-foreground">{product.title}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground">{product.sku}</td>
-                    <td className="px-6 py-4 text-sm font-medium text-foreground">INR {product.base_price.toLocaleString()}</td>
-                    <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          product.offer_status === "LIVE" ? "bg-success/10 text-success" : "bg-warning/10 text-warning"
-                        }`}
-                      >
-                        {product.offer_status === "LIVE" ? "Live" : "Pending Review"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );

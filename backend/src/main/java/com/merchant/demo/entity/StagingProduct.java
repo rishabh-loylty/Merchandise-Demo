@@ -60,6 +60,9 @@ public class StagingProduct {
     @Column(name = "admin_notes", columnDefinition = "text")
     private String adminNotes;
 
+    @Column(name = "rejection_reason", columnDefinition = "text")
+    private String rejectionReason;
+
     @OneToMany(mappedBy = "stagingProduct", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @Builder.Default
     private List<StagingVariant> variants = new ArrayList<>();

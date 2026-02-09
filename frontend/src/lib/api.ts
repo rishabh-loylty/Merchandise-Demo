@@ -1,6 +1,23 @@
-import type { Merchant, UpdateMerchantResponse } from "./types";
+import type {
+  Merchant,
+  UpdateMerchantResponse,
+  StagingProductListItem,
+  IssueProduct,
+  DashboardStats,
+  LiveProductItem,
+} from "./types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+/** Fetcher for SWR that hits the backend (use with keys like /api/merchants/1/staging) */
+export const apiFetcher = (url: string) =>
+  fetch(`${API_BASE_URL}${url}`, { credentials: "omit" }).then((res) => {
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const contentType = res.headers.get("content-type");
+    if (contentType?.includes("application/json")) return res.json();
+    return undefined;
+  });
 
 class ApiClient {
 
@@ -71,6 +88,29 @@ class ApiClient {
 
   async syncMerchant(id: string): Promise<void> {
     return this.fetch<void>(`/api/merchants/${id}/sync`, {
+      method: "POST",
+    });
+  }
+
+  async getStaging(merchantId: number): Promise<StagingProductListItem[]> {
+    return this.fetch<StagingProductListItem[]>(`/api/merchants/${merchantId}/staging`);
+  }
+
+  async getIssues(merchantId: number): Promise<IssueProduct[]> {
+    return this.fetch<IssueProduct[]>(`/api/merchants/${merchantId}/issues`);
+  }
+
+  async getStats(merchantId: number): Promise<DashboardStats> {
+    return this.fetch<DashboardStats>(`/api/merchants/${merchantId}/stats`);
+  }
+
+  async getProducts(merchantId: number, status: string = "all"): Promise<LiveProductItem[]> {
+    const params = new URLSearchParams({ merchantId: String(merchantId), status });
+    return this.fetch<LiveProductItem[]>(`/api/products?${params}`);
+  }
+
+  async resyncStagingProduct(merchantId: number, stagingId: number): Promise<void> {
+    return this.fetch<void>(`/api/merchants/${merchantId}/products/${stagingId}/resync`, {
       method: "POST",
     });
   }

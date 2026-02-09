@@ -2,7 +2,9 @@ package com.merchant.demo.controller;
 
 import com.merchant.demo.dto.SyncResultDto;
 import com.merchant.demo.entity.Merchant;
+import com.merchant.demo.entity.StagingProduct;
 import com.merchant.demo.repository.MerchantRepository;
+import com.merchant.demo.repository.StagingProductRepository;
 import com.merchant.demo.service.ProductSyncService;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,11 +47,15 @@ class MerchantControllerIntegrationTest {
     @Autowired
     private MerchantRepository merchantRepository;
 
+    @Autowired
+    private StagingProductRepository stagingProductRepository;
+
     @MockitoBean
     private ProductSyncService productSyncService;
 
     @BeforeEach
     void setUp() {
+        stagingProductRepository.deleteAll();
         merchantRepository.deleteAll();
     }
 
@@ -162,5 +168,95 @@ class MerchantControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.message").value("Sync completed successfully"))
                 .andExpect(jsonPath("$.productsSynced").value(10));
+    }
+
+    // --- Merchant Operations: staging, issues, resync (TDD) ---
+
+    @Test
+    void getStaging_returnsStagingProductsForMerchant() throws Exception {
+        Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
+        StagingProduct p1 = stagingProductRepository.save(StagingProduct.builder()
+                .merchantId(merchant.getId())
+                .rawTitle("Nike Air Max")
+                .rawVendor("Nike")
+                .rawProductType("Shoes")
+                .status("PENDING")
+                .build());
+        StagingProduct p2 = stagingProductRepository.save(StagingProduct.builder()
+                .merchantId(merchant.getId())
+                .rawTitle("Puma Jacket")
+                .rawVendor("Puma")
+                .rawProductType("Apparel")
+                .status("NEEDS_REVIEW")
+                .build());
+
+        mockMvc.perform(get("/api/merchants/{id}/staging", merchant.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[*].title").value(org.hamcrest.Matchers.hasItems("Nike Air Max", "Puma Jacket")))
+                .andExpect(jsonPath("$[*].vendor").value(org.hamcrest.Matchers.hasItems("Nike", "Puma")))
+                .andExpect(jsonPath("$[0].id").exists())
+                .andExpect(jsonPath("$[0].productType").exists())
+                .andExpect(jsonPath("$[0].status").exists())
+                .andExpect(jsonPath("$[0].createdAt").exists());
+    }
+
+    @Test
+    void getStaging_returns404_whenMerchantNotFound() throws Exception {
+        mockMvc.perform(get("/api/merchants/99999/staging"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void getIssues_returnsRejectedStagingProducts() throws Exception {
+        Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
+        StagingProduct rejected = stagingProductRepository.save(StagingProduct.builder()
+                .merchantId(merchant.getId())
+                .rawTitle("Reebok T-Shirt")
+                .rawVendor("Reebok")
+                .status("REJECTED")
+                .rejectionReason("Image resolution too low")
+                .build());
+
+        mockMvc.perform(get("/api/merchants/{id}/issues", merchant.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].id", is(rejected.getId())))
+                .andExpect(jsonPath("$[0].title", is("Reebok T-Shirt")))
+                .andExpect(jsonPath("$[0].vendor", is("Reebok")))
+                .andExpect(jsonPath("$[0].rejectionReason", is("Image resolution too low")))
+                .andExpect(jsonPath("$[0].rejectedAt").exists());
+    }
+
+    @Test
+    void postResync_setsStatusToPendingSync() throws Exception {
+        Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
+        StagingProduct staging = stagingProductRepository.save(StagingProduct.builder()
+                .merchantId(merchant.getId())
+                .rawTitle("Item")
+                .rawVendor("V")
+                .status("REJECTED")
+                .build());
+
+        mockMvc.perform(post("/api/merchants/{id}/products/{stagingId}/resync", merchant.getId(), staging.getId()))
+                .andExpect(status().isOk());
+
+        StagingProduct updated = stagingProductRepository.findById(staging.getId()).orElseThrow();
+        org.junit.jupiter.api.Assertions.assertEquals("PENDING_SYNC", updated.getStatus());
+    }
+
+    @Test
+    void getStats_returnsAggregatedCounts() throws Exception {
+        Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
+        stagingProductRepository.save(StagingProduct.builder().merchantId(merchant.getId()).rawTitle("A").rawVendor("V").status("PENDING").build());
+        stagingProductRepository.save(StagingProduct.builder().merchantId(merchant.getId()).rawTitle("B").rawVendor("V").status("NEEDS_REVIEW").build());
+        stagingProductRepository.save(StagingProduct.builder().merchantId(merchant.getId()).rawTitle("C").rawVendor("V").status("REJECTED").build());
+
+        mockMvc.perform(get("/api/merchants/{id}/stats", merchant.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.underReview", is(2)))
+                .andExpect(jsonPath("$.issues", is(1)))
+                .andExpect(jsonPath("$.liveProducts").exists())
+                .andExpect(jsonPath("$.totalSkus").exists());
     }
 }
