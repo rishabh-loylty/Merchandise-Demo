@@ -12,6 +12,9 @@ import com.merchant.demo.service.ProductSyncService;
 import com.merchant.demo.service.StagingProductService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -75,18 +78,34 @@ public class MerchantController {
     }
 
     @GetMapping("/{merchantId}/staging")
-    public ResponseEntity<List<StagingProductListItemDto>> getStaging(@PathVariable Integer merchantId) {
+    public ResponseEntity<Page<StagingProductListItemDto>> getStaging(
+            @PathVariable Integer merchantId,
+            @PageableDefault(size = 20) Pageable pageable) {
         try {
-            return ResponseEntity.ok(stagingProductService.getStagingForMerchant(merchantId));
+            return ResponseEntity.ok(stagingProductService.getStagingForMerchant(merchantId, pageable));
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
     }
 
     @GetMapping("/{merchantId}/issues")
-    public ResponseEntity<List<IssueProductDto>> getIssues(@PathVariable Integer merchantId) {
+    public ResponseEntity<Page<IssueProductDto>> getIssues(
+            @PathVariable Integer merchantId,
+            @PageableDefault(size = 20) Pageable pageable) {
         try {
-            return ResponseEntity.ok(stagingProductService.getIssuesForMerchant(merchantId));
+            return ResponseEntity.ok(stagingProductService.getIssuesForMerchant(merchantId, pageable));
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @GetMapping("/{merchantId}/search")
+    public ResponseEntity<Page<StagingProductListItemDto>> searchProducts(
+            @PathVariable Integer merchantId,
+            @RequestParam(required = false, defaultValue = "") String q,
+            @PageableDefault(size = 20) Pageable pageable) {
+        try {
+            return ResponseEntity.ok(stagingProductService.searchStagingProducts(merchantId, q, pageable));
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }

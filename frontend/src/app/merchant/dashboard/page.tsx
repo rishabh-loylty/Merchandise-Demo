@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { toast } from "sonner";
 import useSWR, { mutate } from "swr";
 
 export default function DashboardPage() {
@@ -38,8 +39,10 @@ export default function DashboardPage() {
         mutate(`/api/merchants/${merchantSession.id}/issues`),
         mutate(`/api/merchants/${merchantSession.id}/staging`),
       ]);
+      toast.success("Catalog synced successfully!");
     } catch (e) {
       console.error(e);
+      toast.error("Sync failed. Please try again.");
     } finally {
       setSyncing(false);
     }

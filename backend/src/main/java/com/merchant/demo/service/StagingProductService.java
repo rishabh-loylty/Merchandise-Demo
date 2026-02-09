@@ -7,8 +7,11 @@ import com.merchant.demo.entity.StagingProduct;
 import com.merchant.demo.repository.MerchantRepository;
 import com.merchant.demo.repository.StagingProductRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -26,17 +29,28 @@ public class StagingProductService {
     private final StagingProductRepository stagingProductRepository;
 
     @Transactional(readOnly = true)
-    public List<StagingProductListItemDto> getStagingForMerchant(Integer merchantId) {
+    public Page<StagingProductListItemDto> getStagingForMerchant(Integer merchantId, Pageable pageable) {
         ensureMerchantExists(merchantId);
-        List<StagingProduct> list = stagingProductRepository.findByMerchantIdOrderByCreatedAtDesc(merchantId);
-        return list.stream().map(this::toStagingListItem).collect(Collectors.toList());
+        return stagingProductRepository.findByMerchantIdOrderByCreatedAtDesc(merchantId, pageable)
+                .map(this::toStagingListItem);
     }
 
     @Transactional(readOnly = true)
-    public List<IssueProductDto> getIssuesForMerchant(Integer merchantId) {
+    public Page<IssueProductDto> getIssuesForMerchant(Integer merchantId, Pageable pageable) {
         ensureMerchantExists(merchantId);
-        List<StagingProduct> list = stagingProductRepository.findByMerchantIdAndStatusOrderByUpdatedAtDesc(merchantId, "REJECTED");
-        return list.stream().map(this::toIssueDto).collect(Collectors.toList());
+        return stagingProductRepository.findByMerchantIdAndStatusOrderByUpdatedAtDesc(merchantId, "REJECTED", pageable)
+                .map(this::toIssueDto);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<StagingProductListItemDto> searchStagingProducts(Integer merchantId, String q, Pageable pageable) {
+        ensureMerchantExists(merchantId);
+        if (!StringUtils.hasText(q) || q.isBlank()) {
+            return stagingProductRepository.findByMerchantIdOrderByCreatedAtDesc(merchantId, pageable)
+                    .map(this::toStagingListItem);
+        }
+        return stagingProductRepository.searchByMerchantId(merchantId, q.trim(), pageable)
+                .map(this::toStagingListItem);
     }
 
     @Transactional
@@ -54,9 +68,8 @@ public class StagingProductService {
     @Transactional(readOnly = true)
     public DashboardStatsDto getStatsForMerchant(Integer merchantId) {
         ensureMerchantExists(merchantId);
-        List<StagingProduct> all = stagingProductRepository.findByMerchantIdOrderByCreatedAtDesc(merchantId);
-        long underReview = all.stream().filter(p -> UNDER_REVIEW_STATUSES.contains(p.getStatus())).count();
-        long issues = all.stream().filter(p -> "REJECTED".equals(p.getStatus())).count();
+        long underReview = stagingProductRepository.countByMerchantIdAndStatusIn(merchantId, List.copyOf(UNDER_REVIEW_STATUSES));
+        long issues = stagingProductRepository.countByMerchantIdAndStatus(merchantId, "REJECTED");
         long liveProducts = 0L; // TODO: when MerchantOffer repo exists
         long totalSkus = underReview + issues + liveProducts;
         return DashboardStatsDto.builder()

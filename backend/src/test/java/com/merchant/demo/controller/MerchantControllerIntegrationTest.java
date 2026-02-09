@@ -173,16 +173,16 @@ class MerchantControllerIntegrationTest {
     // --- Merchant Operations: staging, issues, resync (TDD) ---
 
     @Test
-    void getStaging_returnsStagingProductsForMerchant() throws Exception {
+    void getStaging_returnsPaginatedStagingProductsForMerchant() throws Exception {
         Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
-        StagingProduct p1 = stagingProductRepository.save(StagingProduct.builder()
+        stagingProductRepository.save(StagingProduct.builder()
                 .merchantId(merchant.getId())
                 .rawTitle("Nike Air Max")
                 .rawVendor("Nike")
                 .rawProductType("Shoes")
                 .status("PENDING")
                 .build());
-        StagingProduct p2 = stagingProductRepository.save(StagingProduct.builder()
+        stagingProductRepository.save(StagingProduct.builder()
                 .merchantId(merchant.getId())
                 .rawTitle("Puma Jacket")
                 .rawVendor("Puma")
@@ -190,15 +190,16 @@ class MerchantControllerIntegrationTest {
                 .status("NEEDS_REVIEW")
                 .build());
 
-        mockMvc.perform(get("/api/merchants/{id}/staging", merchant.getId()))
+        mockMvc.perform(get("/api/merchants/{id}/staging", merchant.getId()).param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[*].title").value(org.hamcrest.Matchers.hasItems("Nike Air Max", "Puma Jacket")))
-                .andExpect(jsonPath("$[*].vendor").value(org.hamcrest.Matchers.hasItems("Nike", "Puma")))
-                .andExpect(jsonPath("$[0].id").exists())
-                .andExpect(jsonPath("$[0].productType").exists())
-                .andExpect(jsonPath("$[0].status").exists())
-                .andExpect(jsonPath("$[0].createdAt").exists());
+                .andExpect(jsonPath("$.content", hasSize(2)))
+                .andExpect(jsonPath("$.totalElements", is(2)))
+                .andExpect(jsonPath("$.content[*].title").value(org.hamcrest.Matchers.hasItems("Nike Air Max", "Puma Jacket")))
+                .andExpect(jsonPath("$.content[*].vendor").value(org.hamcrest.Matchers.hasItems("Nike", "Puma")))
+                .andExpect(jsonPath("$.content[0].id").exists())
+                .andExpect(jsonPath("$.content[0].productType").exists())
+                .andExpect(jsonPath("$.content[0].status").exists())
+                .andExpect(jsonPath("$.content[0].createdAt").exists());
     }
 
     @Test
@@ -208,7 +209,7 @@ class MerchantControllerIntegrationTest {
     }
 
     @Test
-    void getIssues_returnsRejectedStagingProducts() throws Exception {
+    void getIssues_returnsPaginatedRejectedStagingProducts() throws Exception {
         Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
         StagingProduct rejected = stagingProductRepository.save(StagingProduct.builder()
                 .merchantId(merchant.getId())
@@ -218,14 +219,15 @@ class MerchantControllerIntegrationTest {
                 .rejectionReason("Image resolution too low")
                 .build());
 
-        mockMvc.perform(get("/api/merchants/{id}/issues", merchant.getId()))
+        mockMvc.perform(get("/api/merchants/{id}/issues", merchant.getId()).param("page", "0").param("size", "20"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].id", is(rejected.getId())))
-                .andExpect(jsonPath("$[0].title", is("Reebok T-Shirt")))
-                .andExpect(jsonPath("$[0].vendor", is("Reebok")))
-                .andExpect(jsonPath("$[0].rejectionReason", is("Image resolution too low")))
-                .andExpect(jsonPath("$[0].rejectedAt").exists());
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.totalElements", is(1)))
+                .andExpect(jsonPath("$.content[0].id", is(rejected.getId())))
+                .andExpect(jsonPath("$.content[0].title", is("Reebok T-Shirt")))
+                .andExpect(jsonPath("$.content[0].vendor", is("Reebok")))
+                .andExpect(jsonPath("$.content[0].rejectionReason", is("Image resolution too low")))
+                .andExpect(jsonPath("$.content[0].rejectedAt").exists());
     }
 
     @Test
@@ -258,5 +260,52 @@ class MerchantControllerIntegrationTest {
                 .andExpect(jsonPath("$.issues", is(1)))
                 .andExpect(jsonPath("$.liveProducts").exists())
                 .andExpect(jsonPath("$.totalSkus").exists());
+    }
+
+    // --- Search (TDD) ---
+
+    @Test
+    void search_returnsMatchingStagingProductsPaginated() throws Exception {
+        Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
+        stagingProductRepository.save(StagingProduct.builder()
+                .merchantId(merchant.getId())
+                .rawTitle("Nike Air Max")
+                .rawVendor("Nike")
+                .rawProductType("Shoes")
+                .status("PENDING")
+                .build());
+        stagingProductRepository.save(StagingProduct.builder()
+                .merchantId(merchant.getId())
+                .rawTitle("Puma Jacket")
+                .rawVendor("Puma")
+                .rawProductType("Apparel")
+                .status("PENDING")
+                .build());
+
+        mockMvc.perform(get("/api/merchants/{id}/search", merchant.getId())
+                        .param("q", "Nike")
+                        .param("page", "0")
+                        .param("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].title", is("Nike Air Max")))
+                .andExpect(jsonPath("$.totalElements", is(1)));
+    }
+
+    @Test
+    void search_returns404_whenMerchantNotFound() throws Exception {
+        mockMvc.perform(get("/api/merchants/99999/search").param("q", "test"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void search_emptyQuery_returnsAllStagingPaginated() throws Exception {
+        Merchant merchant = merchantRepository.save(Merchant.builder().name("Store").email("s@t.com").isActive(true).build());
+        stagingProductRepository.save(StagingProduct.builder().merchantId(merchant.getId()).rawTitle("A").rawVendor("V").status("PENDING").build());
+
+        mockMvc.perform(get("/api/merchants/{id}/search", merchant.getId()).param("page", "0").param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSize(1)))
+                .andExpect(jsonPath("$.content[0].title", is("A")));
     }
 }

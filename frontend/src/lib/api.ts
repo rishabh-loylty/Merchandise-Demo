@@ -5,6 +5,7 @@ import type {
   IssueProduct,
   DashboardStats,
   LiveProductItem,
+  PageResponse,
 } from "./types";
 
 export const API_BASE_URL =
@@ -92,12 +93,25 @@ class ApiClient {
     });
   }
 
-  async getStaging(merchantId: number): Promise<StagingProductListItem[]> {
-    return this.fetch<StagingProductListItem[]>(`/api/merchants/${merchantId}/staging`);
+  async getStaging(merchantId: number, page = 0, size = 20): Promise<PageResponse<StagingProductListItem>> {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    return this.fetch<PageResponse<StagingProductListItem>>(`/api/merchants/${merchantId}/staging?${params}`);
   }
 
-  async getIssues(merchantId: number): Promise<IssueProduct[]> {
-    return this.fetch<IssueProduct[]>(`/api/merchants/${merchantId}/issues`);
+  async getIssues(merchantId: number, page = 0, size = 20): Promise<PageResponse<IssueProduct>> {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    return this.fetch<PageResponse<IssueProduct>>(`/api/merchants/${merchantId}/issues?${params}`);
+  }
+
+  async searchStagingProducts(
+    merchantId: number,
+    q: string,
+    page = 0,
+    size = 20
+  ): Promise<PageResponse<StagingProductListItem>> {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (q.trim()) params.set("q", q.trim());
+    return this.fetch<PageResponse<StagingProductListItem>>(`/api/merchants/${merchantId}/search?${params}`);
   }
 
   async getStats(merchantId: number): Promise<DashboardStats> {

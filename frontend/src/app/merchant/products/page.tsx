@@ -5,17 +5,31 @@ import { apiClient, apiFetcher } from "@/lib/api";
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   ExternalLink,
-  Filter,
   RefreshCw,
   Search,
-  AlertTriangle
+  AlertTriangle,
 } from "lucide-react";
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR, { mutate } from "swr";
+import { toast } from "sonner";
+
+const PAGE_SIZE = 20;
+const SEARCH_DEBOUNCE_MS = 300;
+
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debouncedValue;
+}
 
 // -- TYPES --
 interface ProductRow {
@@ -37,22 +51,47 @@ export default function ProductsPage() {
   const currentTab = searchParams.get("tab") || "live";
 
   const [resyncingId, setResyncingId] = useState<number | null>(null);
+  const [stagingPage, setStagingPage] = useState(0);
+  const [issuesPage, setIssuesPage] = useState(0);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchPage, setSearchPage] = useState(0);
 
-  // -- DATA FETCHING --
+  const debouncedSearch = useDebouncedValue(searchInput.trim(), SEARCH_DEBOUNCE_MS);
+  const isSearchActive = debouncedSearch.length > 0;
+
+  // -- DATA FETCHING (paginated) --
   const liveProductsUrl = merchantSession
     ? `/api/products?merchantId=${merchantSession.id}&status=all`
     : null;
   const { data: liveProducts } = useSWR(liveProductsUrl, apiFetcher);
 
-  const { data: stagingProducts } = useSWR(
-    merchantSession ? `/api/merchants/${merchantSession.id}/staging` : null,
-    apiFetcher
-  );
+  const stagingUrl = merchantSession
+    ? `/api/merchants/${merchantSession.id}/staging?page=${stagingPage}&size=${PAGE_SIZE}`
+    : null;
+  const { data: stagingPageData } = useSWR(stagingUrl, apiFetcher);
 
-  const { data: issues } = useSWR(
-    merchantSession ? `/api/merchants/${merchantSession.id}/issues` : null,
-    apiFetcher
-  );
+  const issuesUrl = merchantSession
+    ? `/api/merchants/${merchantSession.id}/issues?page=${issuesPage}&size=${PAGE_SIZE}`
+    : null;
+  const { data: issuesPageData } = useSWR(issuesUrl, apiFetcher);
+
+  const searchUrl =
+    merchantSession && debouncedSearch
+      ? `/api/merchants/${merchantSession.id}/search?q=${encodeURIComponent(debouncedSearch)}&page=${searchPage}&size=${PAGE_SIZE}`
+      : null;
+  const { data: searchPageData } = useSWR(searchUrl, apiFetcher);
+
+  const stagingProducts = stagingPageData?.content ?? [];
+  const stagingTotal = stagingPageData?.totalElements ?? 0;
+  const stagingTotalPages = stagingPageData?.totalPages ?? 0;
+
+  const issues = issuesPageData?.content ?? [];
+  const issuesTotal = issuesPageData?.totalElements ?? 0;
+  const issuesTotalPages = issuesPageData?.totalPages ?? 0;
+
+  const searchResults = searchPageData?.content ?? [];
+  const searchTotal = searchPageData?.totalElements ?? 0;
+  const searchTotalPages = searchPageData?.totalPages ?? 0;
 
   // -- TAB LOGIC --
   const handleTabChange = (tab: string) => {
@@ -60,6 +99,26 @@ export default function ProductsPage() {
   };
 
   const renderContent = () => {
+    if (isSearchActive) {
+      return (
+        <>
+          <ProductTable
+            data={searchResults}
+            type="STAGING"
+            emptyMessage="No products match your search."
+          />
+          {searchTotalPages > 1 && (
+            <PaginationBar
+              page={searchPage}
+              totalPages={searchTotalPages}
+              totalElements={searchTotal}
+              pageSize={PAGE_SIZE}
+              onPageChange={setSearchPage}
+            />
+          )}
+        </>
+      );
+    }
     if (currentTab === "live") {
       return (
         <ProductTable
@@ -71,22 +130,44 @@ export default function ProductsPage() {
     }
     if (currentTab === "review") {
       return (
-        <ProductTable
-          data={stagingProducts || []}
-          type="STAGING"
-          emptyMessage="No products currently under review."
-        />
+        <>
+          <ProductTable
+            data={stagingProducts}
+            type="STAGING"
+            emptyMessage="No products currently under review."
+          />
+          {stagingTotalPages > 1 && (
+            <PaginationBar
+              page={stagingPage}
+              totalPages={stagingTotalPages}
+              totalElements={stagingTotal}
+              pageSize={PAGE_SIZE}
+              onPageChange={setStagingPage}
+            />
+          )}
+        </>
       );
     }
     if (currentTab === "issues") {
       return (
-        <ProductTable
-          data={issues || []}
-          type="ISSUE"
-          emptyMessage="Great! No products require attention."
-          onAction={handleResyncIssue}
-          actionLoadingId={resyncingId}
-        />
+        <>
+          <ProductTable
+            data={issues}
+            type="ISSUE"
+            emptyMessage="Great! No products require attention."
+            onAction={handleResyncIssue}
+            actionLoadingId={resyncingId}
+          />
+          {issuesTotalPages > 1 && (
+            <PaginationBar
+              page={issuesPage}
+              totalPages={issuesTotalPages}
+              totalElements={issuesTotal}
+              pageSize={PAGE_SIZE}
+              onPageChange={setIssuesPage}
+            />
+          )}
+        </>
       );
     }
   };
@@ -98,11 +179,13 @@ export default function ProductsPage() {
     try {
       await apiClient.resyncStagingProduct(merchantSession.id, id);
       await Promise.all([
-        mutate(`/api/merchants/${merchantSession.id}/issues`),
-        mutate(`/api/merchants/${merchantSession.id}/staging`),
+        mutate(issuesUrl),
+        mutate(stagingUrl),
       ]);
+      toast.success("Product queued for resync.");
     } catch (e) {
       console.error(e);
+      toast.error("Resync failed. Please try again.");
     } finally {
       setResyncingId(null);
     }
@@ -113,11 +196,15 @@ export default function ProductsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">Catalog</h1>
         
-        {/* Search Bar - Visual only for now */}
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
-            placeholder="Search products..."
+            value={searchInput}
+            onChange={(e) => {
+              setSearchInput(e.target.value);
+              setSearchPage(0);
+            }}
+            placeholder="Search by title, vendor, SKU..."
             className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-4 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
@@ -127,26 +214,26 @@ export default function ProductsPage() {
       <div className="border-b border-border">
         <nav className="-mb-px flex gap-6" aria-label="Tabs">
           <TabButton
-            active={currentTab === "live"}
+            active={currentTab === "live" && !isSearchActive}
             onClick={() => handleTabChange("live")}
             label="Live"
-            count={liveProducts?.filter((p: any) => (p.offer_status ?? p.offerStatus) === "LIVE").length}
+            count={liveProducts?.filter((p: any) => (p.offer_status ?? p.offerStatus) === "LIVE").length ?? 0}
             icon={CheckCircle2}
             colorClass="text-success"
           />
           <TabButton
-            active={currentTab === "review"}
+            active={currentTab === "review" && !isSearchActive}
             onClick={() => handleTabChange("review")}
             label="Under Review"
-            count={stagingProducts?.length}
+            count={stagingTotal}
             icon={Clock}
             colorClass="text-warning"
           />
           <TabButton
-            active={currentTab === "issues"}
+            active={currentTab === "issues" && !isSearchActive}
             onClick={() => handleTabChange("issues")}
             label="Needs Attention"
-            count={issues?.length}
+            count={issuesTotal}
             icon={AlertTriangle}
             colorClass="text-destructive"
           />
@@ -162,6 +249,53 @@ export default function ProductsPage() {
 }
 
 // -- SUB COMPONENTS --
+
+function PaginationBar({
+  page,
+  totalPages,
+  totalElements,
+  pageSize,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  totalElements: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+}) {
+  const from = page * pageSize + 1;
+  const to = Math.min((page + 1) * pageSize, totalElements);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border px-4 py-3">
+      <p className="text-sm text-muted-foreground">
+        Showing {totalElements === 0 ? 0 : from}-{to} of {totalElements}
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 0}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-muted"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Previous
+        </button>
+        <span className="text-sm text-muted-foreground">
+          Page {page + 1} of {totalPages || 1}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= totalPages - 1}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 text-sm font-medium disabled:opacity-50 hover:bg-muted"
+        >
+          Next
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function TabButton({ active, onClick, label, count, icon: Icon, colorClass }: any) {
   return (

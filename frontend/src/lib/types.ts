@@ -147,3 +147,14 @@ export interface LiveProductItem {
   offer_status: string;
   image_url: string | null;
 }
+
+// Spring Page response
+export interface PageResponse<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
+  first: boolean;
+  last: boolean;
+}
