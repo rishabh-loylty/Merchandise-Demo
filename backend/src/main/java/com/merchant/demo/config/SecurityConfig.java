@@ -36,6 +36,7 @@ public class SecurityConfig {
                 .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll() // CORS preflight
                 .requestMatchers("/api/health").permitAll() // Allow public access to health check
                 .requestMatchers("/api/merchants/**").permitAll() // Allow public access to merchants
+                .requestMatchers("/api/admin/**").permitAll() // Allow public access to merchants
                 .anyRequest().authenticated() // Secure everything else
             );
 

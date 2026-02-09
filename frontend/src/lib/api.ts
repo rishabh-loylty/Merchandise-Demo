@@ -6,6 +6,11 @@ import type {
   DashboardStats,
   LiveProductItem,
   PageResponse,
+  AdminStats,
+  ReviewQueuePage,
+  MasterProductSearchItem,
+  VariantMatchResponse,
+  StagingDetail,
 } from "./types";
 
 export const API_BASE_URL =
@@ -126,6 +131,69 @@ class ApiClient {
   async resyncStagingProduct(merchantId: number, stagingId: number): Promise<void> {
     return this.fetch<void>(`/api/merchants/${merchantId}/products/${stagingId}/resync`, {
       method: "POST",
+    });
+  }
+
+  // Admin APIs (Spring Boot backend)
+  async getAdminStats(): Promise<AdminStats> {
+    return this.fetch<AdminStats>("/api/admin/stats");
+  }
+
+  async getAdminQueue(status: string | null, page = 0, size = 20): Promise<ReviewQueuePage> {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (status) params.set("status", status);
+    return this.fetch<ReviewQueuePage>(`/api/admin/queue?${params}`);
+  }
+
+  async getMasterProducts(page = 0, size = 20): Promise<PageResponse<MasterProductSearchItem>> {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    return this.fetch<PageResponse<MasterProductSearchItem>>(`/api/admin/products?${params}`);
+  }
+
+  async searchMasterProducts(q: string): Promise<MasterProductSearchItem[]> {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    return this.fetch<MasterProductSearchItem[]>(`/api/admin/products/search?${params}`);
+  }
+
+  async updateMasterProduct(
+    productId: number,
+    data: { title?: string; description?: string; brand_id?: number; image_url?: string }
+  ): Promise<void> {
+    return this.fetch<void>(`/api/admin/products/${productId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getStagingDetail(stagingId: number): Promise<StagingDetail> {
+    return this.fetch<StagingDetail>(`/api/admin/review/${stagingId}`);
+  }
+
+  async getVariantMatch(stagingId: number, targetMasterId: number): Promise<VariantMatchResponse> {
+    return this.fetch<VariantMatchResponse>(
+      `/api/admin/review/${stagingId}/variants/match?targetMasterId=${targetMasterId}`
+    );
+  }
+
+  async submitReviewDecision(
+    stagingId: number,
+    body: {
+      action: string;
+      clean_data?: { title: string; description?: string; brand_id?: number; category_id?: number };
+      master_product_id?: number;
+      variant_mapping?: Array<{
+        staging_variant_id: number;
+        master_variant_id: number | null;
+        new_variant_attributes?: Record<string, string>;
+      }>;
+      rejection_reason?: string;
+      admin_notes?: string;
+    }
+  ): Promise<void> {
+    return this.fetch<void>(`/api/admin/review/${stagingId}/decision`, {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   }
 }

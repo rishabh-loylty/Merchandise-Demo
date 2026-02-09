@@ -158,3 +158,69 @@ export interface PageResponse<T> {
   first: boolean;
   last: boolean;
 }
+
+// Admin APIs
+export interface AdminStats {
+  pending_reviews: number;
+  total_master_products: number;
+  rejected_this_week: number;
+}
+
+export interface ReviewQueueItem {
+  staging_id: number;
+  merchant_name: string;
+  raw_title: string;
+  created_at: string;
+  match_confidence: number;
+  suggested_master_id: number | null;
+}
+
+export interface ReviewQueuePage {
+  content: ReviewQueueItem[];
+  total_elements: number;
+}
+
+export interface MasterProductSearchItem {
+  id: number;
+  title: string;
+  brand: string;
+  image_url: string | null;
+  variant_count: number;
+}
+
+export interface VariantMatchItem {
+  staging_variant_id: number;
+  staging_options: Record<string, string>;
+  suggested_master_variant_id: number | null;
+  match_reason: string;
+}
+
+export interface VariantMatchResponse {
+  staging_product_id: number;
+  master_product_id: number;
+  matches: VariantMatchItem[];
+}
+
+export interface StagingVariantSummary {
+  staging_variant_id: number;
+  raw_sku: string | null;
+  raw_barcode: string | null;
+  raw_price_minor: number | null;
+  raw_options: Record<string, string>;
+}
+
+export interface StagingDetail {
+  staging_id: number;
+  merchant_id: number;
+  merchant_name: string;
+  raw_title: string;
+  raw_body_html: string | null;
+  raw_vendor: string | null;
+  raw_product_type: string | null;
+  status: string;
+  match_confidence_score: number | null;
+  suggested_product_id: number | null;
+  created_at: string;
+  image_url: string | null;
+  variants: StagingVariantSummary[];
+}

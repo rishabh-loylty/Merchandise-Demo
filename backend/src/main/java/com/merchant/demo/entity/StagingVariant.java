@@ -46,4 +46,10 @@ public class StagingVariant {
     @CreationTimestamp
     @Column(name = "created_at")
     private Instant createdAt;
+
+    @Column(name = "suggested_variant_id")
+    private Integer suggestedVariantId;
+
+    @Column(name = "matched_variant_id")
+    private Integer matchedVariantId;
 }

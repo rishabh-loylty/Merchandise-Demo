@@ -57,6 +57,9 @@ public class StagingProduct {
     @Column(name = "match_confidence_score")
     private Integer matchConfidenceScore;
 
+    @Column(name = "suggested_product_id")
+    private Integer suggestedProductId;
+
     @Column(name = "admin_notes", columnDefinition = "text")
     private String adminNotes;
 

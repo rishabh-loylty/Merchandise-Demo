@@ -36,6 +36,7 @@ import {
 	Settings,
 	LayoutDashboard,
 	ClipboardCheck,
+	ListChecks,
 	Users,
 	Layers,
 	Percent,
@@ -395,7 +396,10 @@ function AdminNavbar({ onExit }: { onExit: () => void }) {
 
 	const navItems = [
 		{ href: "/admin", label: "Overview", icon: LayoutDashboard },
+		{ href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+		{ href: "/admin/queue", label: "Queue", icon: ListChecks },
 		{ href: "/admin/review", label: "Review", icon: ClipboardCheck },
+		{ href: "/admin/catalog", label: "Catalog", icon: Package },
 		{ href: "/admin/merchants", label: "Merchants", icon: Store },
 		{ href: "/admin/brands", label: "Brands", icon: Layers },
 		{ href: "/admin/categories", label: "Categories", icon: Package },

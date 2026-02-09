@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,4 +37,8 @@ public interface StagingProductRepository extends JpaRepository<StagingProduct, 
     long countByMerchantIdAndStatusIn(Integer merchantId, List<String> statuses);
 
     long countByMerchantIdAndStatus(Integer merchantId, String status);
+
+    Page<StagingProduct> findByStatusInOrderByCreatedAtAsc(List<String> statuses, Pageable pageable);
+
+    long countByStatusAndUpdatedAtAfter(String status, Instant after);
 }
