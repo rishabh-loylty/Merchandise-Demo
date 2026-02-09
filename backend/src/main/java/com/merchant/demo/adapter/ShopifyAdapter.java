@@ -209,7 +209,9 @@ public class ShopifyAdapter {
                           mediaContentType
                           alt
                           preview { image { url } }
-                          image { url altText }
+                          ... on MediaImage {
+                            image { url altText }
+                          }
                         }
                       }
                     }

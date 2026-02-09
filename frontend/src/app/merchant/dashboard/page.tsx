@@ -1,6 +1,7 @@
 "use client";
 
 import { useGlobal } from "@/context/global-context";
+import { apiClient } from "@/lib/api";
 import { fetcher } from "@/lib/fetcher";
 import type { ApiProduct } from "@/lib/types";
 import {
@@ -62,13 +63,15 @@ export default function MerchantDashboardPage() {
     if (!merchantSession) return;
     setSyncing(true);
     try {
-      await fetch(`/api/merchants/${merchantSession.id}/sync`, { method: "POST" });
+      apiClient.syncMerchant(merchantSession.id.toString());
       mutate();
       mutateStaging();
-    } catch {
-      // handle error silently
+      mutateIssues();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setSyncing(false);
     }
-    setSyncing(false);
   };
 
   const handleResync = async (issueId: number) => {

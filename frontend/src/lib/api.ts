@@ -68,6 +68,12 @@ class ApiClient {
       }),
     });
   }
+
+  async syncMerchant(id: string): Promise<void> {
+    return this.fetch<void>(`/api/merchants/${id}/sync`, {
+      method: "POST",
+    });
+  }
 }
 
 export const apiClient = new ApiClient();
