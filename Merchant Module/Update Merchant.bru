@@ -1,0 +1,21 @@
+meta {
+  name: Update Merchant
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{HOST}}/api/merchants/{{MERCHANT_ID}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "shopify_configured": false,
+    "source_config": {
+      "store_url": "{{STORE_URL}}",
+      "access_token": "{{ACCESS_TOKEN}}"
+    }
+  }
+}

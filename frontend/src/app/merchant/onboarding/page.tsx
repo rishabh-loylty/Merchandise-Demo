@@ -1,6 +1,7 @@
 "use client";
 
 import { useGlobal } from "@/context/global-context";
+import { apiClient } from "@/lib/api";
 import { Link2, ShoppingBag } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -39,21 +40,15 @@ export default function OnboardingPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`/api/merchants/${merchantSession.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shopify_configured: true,
-          source_config: { store_url: storeUrl.trim(), access_token: accessToken.trim() },
-        }),
-      });
-      if (res.ok) {
+      const res = await apiClient.updateMerchant(merchantSession.id.toString(), { shopify_configured: true, source_config: { store_url: storeUrl.trim(), access_token: accessToken.trim() } });
+      if (res) {
         updateMerchantSession({ shopify_configured: true });
         router.push("/merchant/dashboard");
       } else {
         setError("Failed to connect. Please try again.");
       }
-    } catch {
+    } catch (error) {
+      console.error(error);
       setError("Failed to connect. Please try again.");
     }
     setLoading(false);

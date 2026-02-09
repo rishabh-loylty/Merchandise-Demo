@@ -1,4 +1,4 @@
-import type { Merchant } from "./types";
+import type { Merchant, UpdateMerchantResponse } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -59,7 +59,15 @@ class ApiClient {
     });
   }
 
-  
+  async updateMerchant(id: string, data: { shopify_configured?: boolean, source_config?: { store_url: string, access_token: string } }): Promise<Merchant> {
+    return this.fetch<UpdateMerchantResponse>(`/api/merchants/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        shopify_configured: data.shopify_configured,
+        source_config: data.source_config,
+      }),
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

@@ -91,3 +91,20 @@ export interface Merchant {
   createdAt: string; // ISO date string
   updatedAt: string; // ISO date string
 }
+
+export interface SourceConfig {
+  store_url: string;
+  access_token: string;
+}
+
+export interface UpdateMerchantResponse {
+  id: number;
+  name: string;
+  email: string;
+  sourceType: "SHOPIFY";
+  sourceConfig: string; // JSON string
+  isActive: boolean;
+  shopifyConfigured: boolean;
+  createdAt: string; // ISO 8601 timestamp
+  updatedAt: string; // ISO 8601 timestamp
+}

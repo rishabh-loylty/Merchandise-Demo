@@ -1,0 +1,18 @@
+meta {
+  name: Create Merchant
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{HOST}}/api/merchants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "name 1" ,
+    "email": "name1@domain.com"
+  }
+}
