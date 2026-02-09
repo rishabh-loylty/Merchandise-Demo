@@ -211,12 +211,12 @@ CREATE TABLE public.products (
     description text,
     image_url text,
     specifications jsonb,
-    base_price numeric(12,2) DEFAULT 0 NOT NULL,
     rating numeric(3,1) DEFAULT 0,
     review_count integer DEFAULT 0,
     status text DEFAULT 'ACTIVE'::text,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
+    options_definition JSONB,
     CONSTRAINT products_status_check CHECK ((status = ANY (ARRAY['DRAFT'::text, 'ACTIVE'::text, 'ARCHIVED'::text])))
 );
 
@@ -238,7 +238,7 @@ CREATE TABLE public.staging_products (
     raw_body_html text,
     raw_vendor text,
     raw_product_type text,
-    raw_tags text,
+    raw_tags text[],
     raw_json_dump jsonb,
     status text DEFAULT 'PENDING'::text,
     rejection_reason text,
@@ -248,6 +248,7 @@ CREATE TABLE public.staging_products (
     match_confidence_score integer DEFAULT 0,
     admin_notes text,
     matched_brand_id integer,
+    raw_options_definition JSONB,
     CONSTRAINT staging_products_status_check CHECK ((status = ANY (ARRAY['PENDING_SYNC'::text, 'PENDING'::text, 'PROCESSING'::text, 'AUTO_MATCHED'::text, 'NEEDS_REVIEW'::text, 'APPROVED'::text, 'REJECTED'::text, 'ARCHIVED'::text])))
 );
 
@@ -261,16 +262,19 @@ CREATE SEQUENCE public.staging_products_id_seq
 
 ALTER SEQUENCE public.staging_products_id_seq OWNED BY public.staging_products.id;
 
+-- PK required before any table references staging_products(id) (e.g. staging_media)
+ALTER TABLE ONLY public.staging_products
+    ADD CONSTRAINT staging_products_pkey PRIMARY KEY (id);
+
 CREATE TABLE public.staging_variants (
     id integer NOT NULL,
     staging_product_id integer,
     external_variant_id text,
     raw_sku text,
     raw_barcode text,
-    raw_price numeric(10,2),
+    raw_price_minor bigint,
     raw_options jsonb,
     status text DEFAULT 'PENDING'::text,
-    matched_master_variant_id integer,
     created_at timestamp with time zone DEFAULT now(),
     suggested_variant_id integer,
     matched_variant_id integer,
@@ -322,12 +326,29 @@ CREATE TABLE public.variants (
     gtin text,
     mpn text,
     weight_grams integer,
-    attributes jsonb,
+    options jsonb,
     is_active boolean DEFAULT true,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now(),
+    status TEXT DEFAULT 'ACTIVE'::text NOT NULL,
     normalized_attributes jsonb DEFAULT '{}'::jsonb
 );
+
+-- DROP TABLE IF EXISTS public.staging_media; -- Run if recreating
+
+CREATE TABLE public.staging_media (
+    id SERIAL PRIMARY KEY,
+    staging_product_id INTEGER NOT NULL REFERENCES public.staging_products(id) ON DELETE CASCADE,
+    external_media_id TEXT,       -- e.g., "gid://shopify/MediaImage/324234"
+    media_type TEXT DEFAULT 'IMAGE', -- 'IMAGE', 'VIDEO', 'EXTERNAL_VIDEO'
+    source_url TEXT NOT NULL,
+    alt_text TEXT,
+    position INTEGER,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+-- Index for faster lookups during sync
+CREATE INDEX idx_staging_media_product ON public.staging_media(staging_product_id);
 
 CREATE SEQUENCE public.variants_id_seq
     AS integer
@@ -421,8 +442,7 @@ ALTER TABLE ONLY public.products
 ALTER TABLE ONLY public.products
     ADD CONSTRAINT products_slug_key UNIQUE (slug);
 
-ALTER TABLE ONLY public.staging_products
-    ADD CONSTRAINT staging_products_pkey PRIMARY KEY (id);
+-- staging_products_pkey already added earlier (before staging_media)
 
 ALTER TABLE ONLY public.staging_variants
     ADD CONSTRAINT staging_variants_pkey PRIMARY KEY (id);
@@ -438,6 +458,10 @@ ALTER TABLE ONLY public.variants
 
 ALTER TABLE ONLY public.variants
     ADD CONSTRAINT variants_pkey PRIMARY KEY (id);
+
+
+ALTER TABLE ONLY public.variants
+    ADD CONSTRAINT variants_status_check CHECK ((status = ANY (ARRAY['ACTIVE'::text, 'DISCONTINUED'::text])));
 
 CREATE INDEX idx_categories_parent_id ON public.categories USING btree (parent_id);
 

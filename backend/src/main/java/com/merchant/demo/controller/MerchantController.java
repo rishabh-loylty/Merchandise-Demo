@@ -1,9 +1,11 @@
 package com.merchant.demo.controller;
 
 import com.merchant.demo.dto.CreateMerchantRequest;
+import com.merchant.demo.dto.SyncResultDto;
 import com.merchant.demo.dto.UpdateMerchantRequest;
 import com.merchant.demo.entity.Merchant;
-import com.merchant.demo.service.MerchantService; // Import Service
+import com.merchant.demo.service.MerchantService;
+import com.merchant.demo.service.ProductSyncService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -20,6 +22,7 @@ import java.util.NoSuchElementException;
 public class MerchantController {
 
     private final MerchantService merchantService;
+    private final ProductSyncService productSyncService;
 
     @GetMapping
     public ResponseEntity<List<Merchant>> getAllMerchants() {
@@ -50,6 +53,19 @@ public class MerchantController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         } catch (Exception e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error updating merchant");
+        }
+    }
+
+    @PostMapping("/{merchantId}/sync")
+    public ResponseEntity<SyncResultDto> syncMerchantProducts(@PathVariable Integer merchantId) {
+        try {
+            SyncResultDto result = productSyncService.syncProductsForMerchant(merchantId);
+            return ResponseEntity.ok(result);
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (Exception e) {
+            // A generic catch-all for other potential issues during sync
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to sync products: " + e.getMessage());
         }
     }
 }

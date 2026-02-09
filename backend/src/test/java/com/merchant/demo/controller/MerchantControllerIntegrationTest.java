@@ -1,7 +1,10 @@
 package com.merchant.demo.controller;
 
+import com.merchant.demo.dto.SyncResultDto;
 import com.merchant.demo.entity.Merchant;
 import com.merchant.demo.repository.MerchantRepository;
+import com.merchant.demo.service.ProductSyncService;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,6 +12,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -17,6 +21,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -39,6 +44,9 @@ class MerchantControllerIntegrationTest {
 
     @Autowired
     private MerchantRepository merchantRepository;
+
+    @MockitoBean
+    private ProductSyncService productSyncService;
 
     @BeforeEach
     void setUp() {
@@ -139,5 +147,20 @@ class MerchantControllerIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void syncMerchantProducts_whenCalled_returnsSyncResult() throws Exception {
+        // Arrange
+        Integer merchantId = 1;
+        SyncResultDto mockResult = new SyncResultDto("Sync completed successfully", 10, 50);
+
+        when(productSyncService.syncProductsForMerchant(merchantId)).thenReturn(mockResult);
+
+        // Act & Assert
+        mockMvc.perform(post("/api/merchants/{merchantId}/sync", merchantId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Sync completed successfully"))
+                .andExpect(jsonPath("$.productsSynced").value(10));
     }
 }
