@@ -170,7 +170,8 @@ class AdminControllerIntegrationTest {
                 .rawBarcode("1234567890123")
                 .build();
         sp.addVariant(sv);
-        stagingProductRepository.save(sp);
+        sp = stagingProductRepository.save(sp);
+        Integer stagingVariantId = sp.getVariants().get(0).getId();
 
         mockMvc.perform(get("/api/admin/review/{stagingId}/variants/match", sp.getId())
                         .param("targetMasterId", String.valueOf(masterProduct.getId())))
@@ -178,7 +179,7 @@ class AdminControllerIntegrationTest {
                 .andExpect(jsonPath("$.staging_product_id", is(sp.getId())))
                 .andExpect(jsonPath("$.master_product_id", is(masterProduct.getId())))
                 .andExpect(jsonPath("$.matches", hasSize(1)))
-                .andExpect(jsonPath("$.matches[0].staging_variant_id", is(sv.getId())))
+                .andExpect(jsonPath("$.matches[0].staging_variant_id", is(stagingVariantId)))
                 .andExpect(jsonPath("$.matches[0].match_reason").exists());
     }
 
@@ -228,7 +229,10 @@ class AdminControllerIntegrationTest {
                 "Nike New Sneakers - Men's",
                 "Description",
                 brand.getId(),
-                1
+                1,
+                null,
+                null,
+                null
         ));
 
         mockMvc.perform(post("/api/admin/review/{stagingId}/decision", sp.getId())
