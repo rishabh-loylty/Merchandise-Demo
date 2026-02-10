@@ -2,27 +2,16 @@ package com.merchant.demo.dto.admin;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
-import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Data
-@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CategoryListItemDto {
-    @JsonProperty("id")
-    private Integer id;
-    @JsonProperty("name")
+public class CreateCategoryRequest {
     private String name;
-    @JsonProperty("slug")
     private String slug;
     @JsonProperty("parent_id")
     private Integer parentId;
-    @JsonProperty("icon")
     private String icon;
-    @JsonProperty("path")
-    private String path;
-    @JsonProperty("is_active")
-    private Boolean isActive;
 }

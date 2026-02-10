@@ -30,6 +30,16 @@ export type { CardProps } from "./card";
 export { Badge, StatusBadge, badgeVariants } from "./badge";
 export type { BadgeProps } from "./badge";
 
+// Checkbox
+export { Checkbox } from "./checkbox";
+
+// Popover
+export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor, PopoverClose } from "./popover";
+
+// Category multi-select (searchable, for product category assignment)
+export { CategoryMultiSelect } from "./category-multi-select";
+export type { CategoryOption } from "./category-multi-select";
+
 // Select
 export {
 	Select,

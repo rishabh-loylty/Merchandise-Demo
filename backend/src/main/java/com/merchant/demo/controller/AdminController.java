@@ -107,4 +107,74 @@ public class AdminController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
     }
+
+    // ── Brand CRUD ──────────────────────────────────────────────────────
+
+    @PostMapping("/brands")
+    public ResponseEntity<BrandListItemDto> createBrand(@RequestBody CreateBrandRequest request) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createBrand(request));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @PatchMapping("/brands/{brandId}")
+    public ResponseEntity<Void> updateBrand(
+            @PathVariable Integer brandId,
+            @RequestBody UpdateBrandRequest request) {
+        try {
+            adminService.updateBrand(brandId, request);
+            return ResponseEntity.ok().build();
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/brands/{brandId}")
+    public ResponseEntity<Void> deleteBrand(@PathVariable Integer brandId) {
+        try {
+            adminService.deleteBrand(brandId);
+            return ResponseEntity.noContent().build();
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    // ── Category CRUD ───────────────────────────────────────────────────
+
+    @PostMapping("/categories")
+    public ResponseEntity<CategoryListItemDto> createCategory(@RequestBody CreateCategoryRequest request) {
+        try {
+            return ResponseEntity.status(HttpStatus.CREATED).body(adminService.createCategory(request));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @PatchMapping("/categories/{categoryId}")
+    public ResponseEntity<Void> updateCategory(
+            @PathVariable Integer categoryId,
+            @RequestBody UpdateCategoryRequest request) {
+        try {
+            adminService.updateCategory(categoryId, request);
+            return ResponseEntity.ok().build();
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/categories/{categoryId}")
+    public ResponseEntity<Void> deleteCategory(@PathVariable Integer categoryId) {
+        try {
+            adminService.deleteCategory(categoryId);
+            return ResponseEntity.noContent().build();
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
 }

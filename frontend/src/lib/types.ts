@@ -237,6 +237,8 @@ export interface BrandListItem {
   id: number;
   name: string;
   slug: string;
+  logo_url: string | null;
+  is_active: boolean;
 }
 
 export interface CategoryListItem {
@@ -244,6 +246,9 @@ export interface CategoryListItem {
   name: string;
   slug: string;
   parent_id: number | null;
+  icon: string | null;
+  path: string | null;
+  is_active: boolean;
 }
 
 export interface MasterVariantDto {

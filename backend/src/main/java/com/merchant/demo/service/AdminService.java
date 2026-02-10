@@ -186,21 +186,42 @@ public class AdminService {
                         .id(b.getId())
                         .name(b.getName())
                         .slug(b.getSlug())
+                        .logoUrl(b.getLogoUrl())
+                        .isActive(b.getIsActive())
                         .build())
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<CategoryListItemDto> listCategories() {
-        return categoryRepository.findAll().stream()
+        List<Category> all = categoryRepository.findAll();
+        // Build a lookup so we can resolve parent names for path computation
+        Map<Integer, Category> byId = all.stream()
+                .collect(Collectors.toMap(Category::getId, c -> c));
+
+        return all.stream()
                 .filter(c -> c.getIsActive() == null || Boolean.TRUE.equals(c.getIsActive()))
                 .map(c -> CategoryListItemDto.builder()
                         .id(c.getId())
                         .name(c.getName())
                         .slug(c.getSlug())
                         .parentId(c.getParentId())
+                        .icon(c.getIcon())
+                        .path(c.getPath() != null ? c.getPath() : buildCategoryPath(c, byId))
+                        .isActive(c.getIsActive())
                         .build())
                 .collect(Collectors.toList());
+    }
+
+    /** Build the full path chain "Grandparent > Parent > Child" for a category. */
+    private String buildCategoryPath(Category category, Map<Integer, Category> byId) {
+        LinkedList<String> parts = new LinkedList<>();
+        Category current = category;
+        while (current != null) {
+            parts.addFirst(current.getName());
+            current = current.getParentId() != null ? byId.get(current.getParentId()) : null;
+        }
+        return String.join(" > ", parts);
     }
 
     @Transactional(readOnly = true)
@@ -292,28 +313,47 @@ public class AdminService {
             throw new IllegalArgumentException("clean_data.title required for CREATE_NEW");
         }
 
-        String optionsDefinition = StringUtils.hasText(clean.getOptionsDefinition())
-                ? clean.getOptionsDefinition()
-                : staging.getRawOptionsDefinition();
+        String slug = StringUtils.hasText(clean.getSlug()) ? clean.getSlug() : generateSlug(clean.getTitle());
 
-        String slug = generateSlug(clean.getTitle());
+        String specificationsJson = "{}";
+        if (clean.getSpecifications() != null) {
+            try {
+                specificationsJson = objectMapper.writeValueAsString(clean.getSpecifications());
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid specifications JSON");
+            }
+        }
+
+        String optionsDefinitionJson = "{}";
+        if (clean.getOptionsDefinition() != null) {
+            try {
+                optionsDefinitionJson = objectMapper.writeValueAsString(clean.getOptionsDefinition());
+            } catch (Exception e) {
+                throw new IllegalArgumentException("Invalid options_definition JSON");
+            }
+        }
+
+
         Product newProduct = productRepository.save(Product.builder()
                 .title(clean.getTitle())
                 .slug(slug)
                 .description(clean.getDescription())
                 .brandId(clean.getBrandId())
                 .status("ACTIVE")
-                .optionsDefinition(optionsDefinition)
+                .specifications(specificationsJson)
+                .optionsDefinition(optionsDefinitionJson)
                 .build());
 
         List<Integer> selectedMediaIds = clean.getSelectedMediaIds() != null ? clean.getSelectedMediaIds() : List.of();
+        String firstImageUrl = null;
+        int mediaPosition = 0;
+
         if (!selectedMediaIds.isEmpty()) {
             List<StagingMedia> stagingMediaList = stagingMediaRepository.findByIdInAndStagingProduct_Id(selectedMediaIds, staging.getId());
             if (stagingMediaList.size() != selectedMediaIds.size()) {
                 throw new IllegalArgumentException("All selected_media_ids must belong to this staging product");
             }
             Map<Integer, StagingMedia> byId = stagingMediaList.stream().collect(Collectors.toMap(StagingMedia::getId, m -> m));
-            String firstImageUrl = null;
             for (int i = 0; i < selectedMediaIds.size(); i++) {
                 StagingMedia sm = byId.get(selectedMediaIds.get(i));
                 if (sm == null) continue;
@@ -322,13 +362,25 @@ public class AdminService {
                         .productId(newProduct.getId())
                         .srcUrl(sm.getSourceUrl())
                         .altText(sm.getAltText())
-                        .position(i)
+                        .position(mediaPosition++)
                         .build());
             }
-            if (firstImageUrl != null) {
-                newProduct.setImageUrl(firstImageUrl);
-                productRepository.save(newProduct);
-            }
+        }
+
+        List<ReviewDecisionRequest.ExtraMediaItemDto> extraMedia = clean.getExtraMedia() != null ? clean.getExtraMedia() : List.of();
+        for (ReviewDecisionRequest.ExtraMediaItemDto item : extraMedia) {
+            if (item == null || item.getUrl() == null || !StringUtils.hasText(item.getUrl().trim())) continue;
+            if (firstImageUrl == null) firstImageUrl = item.getUrl().trim();
+            mediaRepository.save(Media.builder()
+                    .productId(newProduct.getId())
+                    .srcUrl(item.getUrl().trim())
+                    .altText(StringUtils.hasText(item.getAltText()) ? item.getAltText().trim() : null)
+                    .position(mediaPosition++)
+                    .build());
+        }
+        if (firstImageUrl != null) {
+            newProduct.setImageUrl(firstImageUrl);
+            productRepository.save(newProduct);
         }
 
         List<Integer> categoryIds = clean.getCategoryIds() != null ? clean.getCategoryIds() : List.of();
@@ -339,33 +391,75 @@ public class AdminService {
                     .build());
         }
 
+        // --- Generate variants from options_definition cross-product ---
+        Map<String, List<String>> optionsDef = parseOptionsDefinition(optionsDefinitionJson);
+
+        List<Map<String, String>> variantCombinations;
+        if (optionsDef.isEmpty()) {
+            // No options: create a single default variant
+            variantCombinations = List.of(Map.of());
+        } else {
+            // Guard against combinatorial explosion
+            long expectedCount = optionsDef.values().stream()
+                    .filter(v -> v != null && !v.isEmpty())
+                    .mapToLong(List::size)
+                    .reduce(1L, (a, b) -> a * b);
+            if (expectedCount > 500) {
+                throw new IllegalArgumentException(
+                        "Options definition would generate " + expectedCount + " variants, which exceeds the maximum of 500. " +
+                        "Reduce the number of option values.");
+            }
+            variantCombinations = computeCrossProduct(optionsDef);
+        }
+
+        // Build a map of staging variants indexed by their options for matching.
+        // Only include option keys that are in the options_definition so that if the admin
+        // removed an option (e.g. "Age"), staging variants still match on the remaining keys.
+        Set<String> definedOptionKeys = optionsDef.keySet().stream()
+                .map(k -> k.toLowerCase().trim())
+                .collect(Collectors.toSet());
+        Map<String, StagingVariant> stagingVariantByOptions = new HashMap<>();
         for (StagingVariant sv : staging.getVariants()) {
-            String internalSku = StringUtils.hasText(sv.getRawSku())
-                    ? sv.getRawSku()
-                    : "STG-" + staging.getId() + "-" + sv.getId();
+            Map<String, String> svOptions = parseOptions(sv.getRawOptions());
+            Map<String, String> filteredOptions = svOptions.entrySet().stream()
+                    .filter(e -> definedOptionKeys.contains(e.getKey().toLowerCase().trim()))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            String key = buildOptionsKey(filteredOptions);
+            stagingVariantByOptions.put(key, sv);
+        }
+
+        for (int idx = 0; idx < variantCombinations.size(); idx++) {
+            Map<String, String> combo = variantCombinations.get(idx);
+
+            // Auto-generate internal SKU from slug + options
+            String skuSuffix = combo.values().stream()
+                    .map(v -> v.toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", ""))
+                    .collect(Collectors.joining("-"));
+            String internalSku = slug + (skuSuffix.isEmpty() ? "" : "-" + skuSuffix)
+                    + "-" + UUID.randomUUID().toString().substring(0, 6);
+
+            String optionsJson;
+            try {
+                optionsJson = objectMapper.writeValueAsString(combo);
+            } catch (Exception e) {
+                optionsJson = "{}";
+            }
+
             Variant newVariant = variantRepository.save(Variant.builder()
                     .product(newProduct)
                     .internalSku(internalSku)
-                    .gtin(sv.getRawBarcode())
-                    .options(sv.getRawOptions())
+                    .options(optionsJson)
                     .isActive(true)
                     .status("ACTIVE")
                     .build());
 
-            long priceMinor = sv.getRawPriceMinor() != null ? sv.getRawPriceMinor() : 0L;
-            merchantOfferRepository.save(MerchantOffer.builder()
-                    .merchantId(staging.getMerchantId())
-                    .variantId(newVariant.getId())
-                    .externalProductId(staging.getExternalProductId())
-                    .externalVariantId(sv.getExternalVariantId())
-                    .merchantSku(sv.getRawSku())
-                    .currencyCode("INR")
-                    .cachedPriceMinor(priceMinor)
-                    .cachedSettlementPriceMinor(priceMinor)
-                    .currentStock(0)
-                    .isActive(true)
-                    .offerStatus("LIVE")
-                    .build());
+            // Try to match a staging variant by options to auto-create a merchant offer
+            String comboKey = buildOptionsKey(combo);
+            StagingVariant matchedSv = stagingVariantByOptions.get(comboKey);
+            if (matchedSv != null) {
+                createMerchantOffer(staging, matchedSv, newVariant.getId());
+                stagingVariantByOptions.remove(comboKey); // prevent double-linking
+            }
         }
 
         staging.setStatus("APPROVED");
@@ -438,6 +532,113 @@ public class AdminService {
         productRepository.save(product);
     }
 
+    // ── Brand CRUD ──────────────────────────────────────────────────────
+
+    @Transactional
+    public BrandListItemDto createBrand(CreateBrandRequest request) {
+        if (!StringUtils.hasText(request.getName())) {
+            throw new IllegalArgumentException("Brand name is required");
+        }
+        String slug = StringUtils.hasText(request.getSlug())
+                ? request.getSlug()
+                : request.getName().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+        Brand brand = brandRepository.save(Brand.builder()
+                .name(request.getName().trim())
+                .slug(slug.trim())
+                .logoUrl(request.getLogoUrl())
+                .isActive(true)
+                .build());
+        return BrandListItemDto.builder()
+                .id(brand.getId())
+                .name(brand.getName())
+                .slug(brand.getSlug())
+                .logoUrl(brand.getLogoUrl())
+                .isActive(brand.getIsActive())
+                .build();
+    }
+
+    @Transactional
+    public void updateBrand(Integer brandId, UpdateBrandRequest request) {
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new NoSuchElementException("Brand not found: " + brandId));
+        if (request.getName() != null) brand.setName(request.getName().trim());
+        if (request.getSlug() != null) brand.setSlug(request.getSlug().trim());
+        if (request.getLogoUrl() != null) brand.setLogoUrl(request.getLogoUrl());
+        if (request.getIsActive() != null) brand.setIsActive(request.getIsActive());
+        brandRepository.save(brand);
+    }
+
+    @Transactional
+    public void deleteBrand(Integer brandId) {
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new NoSuchElementException("Brand not found: " + brandId));
+        brandRepository.delete(brand);
+    }
+
+    // ── Category CRUD ───────────────────────────────────────────────────
+
+    @Transactional
+    public CategoryListItemDto createCategory(CreateCategoryRequest request) {
+        if (!StringUtils.hasText(request.getName())) {
+            throw new IllegalArgumentException("Category name is required");
+        }
+        String slug = StringUtils.hasText(request.getSlug())
+                ? request.getSlug()
+                : request.getName().toLowerCase().replaceAll("[^a-z0-9]+", "-").replaceAll("^-|-$", "");
+
+        // Resolve parent for path computation
+        String parentPath = null;
+        if (request.getParentId() != null) {
+            Category parent = categoryRepository.findById(request.getParentId())
+                    .orElseThrow(() -> new NoSuchElementException("Parent category not found: " + request.getParentId()));
+            parentPath = parent.getPath() != null ? parent.getPath() : parent.getName();
+        }
+        String path = parentPath != null
+                ? parentPath + " > " + request.getName().trim()
+                : request.getName().trim();
+
+        Category category = categoryRepository.save(Category.builder()
+                .name(request.getName().trim())
+                .slug(slug.trim())
+                .parentId(request.getParentId())
+                .icon(request.getIcon())
+                .path(path)
+                .isActive(true)
+                .build());
+        return CategoryListItemDto.builder()
+                .id(category.getId())
+                .name(category.getName())
+                .slug(category.getSlug())
+                .parentId(category.getParentId())
+                .icon(category.getIcon())
+                .path(category.getPath())
+                .isActive(category.getIsActive())
+                .build();
+    }
+
+    @Transactional
+    public void updateCategory(Integer categoryId, UpdateCategoryRequest request) {
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new NoSuchElementException("Category not found: " + categoryId));
+        if (request.getName() != null) category.setName(request.getName().trim());
+        if (request.getSlug() != null) category.setSlug(request.getSlug().trim());
+        if (request.getParentId() != null) {
+            if (request.getParentId().equals(categoryId)) {
+                throw new IllegalArgumentException("Category cannot be its own parent");
+            }
+            category.setParentId(request.getParentId());
+        }
+        if (request.getIsActive() != null) category.setIsActive(request.getIsActive());
+        categoryRepository.save(category);
+    }
+
+    @Transactional
+    public void deleteCategory(Integer categoryId) {
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new NoSuchElementException("Category not found: " + categoryId));
+        categoryRepository.delete(category);
+    }
+
     private void createMerchantOffer(StagingProduct staging, StagingVariant sv, Integer variantId) {
         if (merchantOfferRepository.existsByMerchantIdAndVariantId(staging.getMerchantId(), variantId)) {
             return;
@@ -483,5 +684,53 @@ public class AdminService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    /**
+     * Parse options_definition JSON like {"Color":["Red","Blue"],"Size":["S","M"]} into a Map.
+     */
+    private Map<String, List<String>> parseOptionsDefinition(String json) {
+        if (!StringUtils.hasText(json) || "{}".equals(json.trim())) return Map.of();
+        try {
+            return objectMapper.readValue(json, new TypeReference<Map<String, List<String>>>() {});
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    /**
+     * Compute the cross-product of all option values.
+     * e.g. {Color:[Red,Blue], Size:[S,M]} → [{Color:Red,Size:S},{Color:Red,Size:M},{Color:Blue,Size:S},{Color:Blue,Size:M}]
+     */
+    private static List<Map<String, String>> computeCrossProduct(Map<String, List<String>> optionsDef) {
+        List<Map<String, String>> result = new ArrayList<>();
+        result.add(new LinkedHashMap<>());
+        for (Map.Entry<String, List<String>> entry : optionsDef.entrySet()) {
+            String optionName = entry.getKey();
+            List<String> values = entry.getValue();
+            if (values == null || values.isEmpty()) continue;
+            List<Map<String, String>> expanded = new ArrayList<>();
+            for (Map<String, String> existing : result) {
+                for (String value : values) {
+                    Map<String, String> copy = new LinkedHashMap<>(existing);
+                    copy.put(optionName, value);
+                    expanded.add(copy);
+                }
+            }
+            result = expanded;
+        }
+        return result;
+    }
+
+    /**
+     * Build a normalized key from option values for matching staging variants to master variants.
+     * Lowercases and trims all values, sorts keys for consistent ordering.
+     */
+    private static String buildOptionsKey(Map<String, String> options) {
+        if (options == null || options.isEmpty()) return "";
+        return options.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(e -> e.getKey().toLowerCase().trim() + "=" + e.getValue().toLowerCase().trim())
+                .collect(Collectors.joining("|"));
     }
 }

@@ -183,8 +183,48 @@ class ApiClient {
     return this.fetch<BrandListItem[]>("/api/admin/brands");
   }
 
+  async createBrand(data: { name: string; slug: string; logo_url?: string | null }): Promise<BrandListItem> {
+    return this.fetch<BrandListItem>("/api/admin/brands", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateBrand(brandId: number, data: { name?: string; slug?: string; logo_url?: string | null; is_active?: boolean }): Promise<void> {
+    return this.fetch<void>(`/api/admin/brands/${brandId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteBrand(brandId: number): Promise<void> {
+    return this.fetch<void>(`/api/admin/brands/${brandId}`, {
+      method: "DELETE",
+    });
+  }
+
   async getAdminCategories(): Promise<CategoryListItem[]> {
     return this.fetch<CategoryListItem[]>("/api/admin/categories");
+  }
+
+  async createCategory(data: { name: string; slug: string; parent_id?: number | null; icon?: string | null }): Promise<CategoryListItem> {
+    return this.fetch<CategoryListItem>("/api/admin/categories", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateCategory(categoryId: number, data: { name?: string; slug?: string; parent_id?: number | null; is_active?: boolean }): Promise<void> {
+    return this.fetch<void>(`/api/admin/categories/${categoryId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteCategory(categoryId: number): Promise<void> {
+    return this.fetch<void>(`/api/admin/categories/${categoryId}`, {
+      method: "DELETE",
+    });
   }
 
   async getProductVariants(productId: number): Promise<MasterVariantDto[]> {
@@ -197,12 +237,16 @@ class ApiClient {
       action: string;
       clean_data?: {
         title: string;
+        slug?: string;
         description?: string;
         brand_id?: number;
         category_id?: number;
         category_ids?: number[];
         selected_media_ids?: number[];
-        options_definition?: string;
+        extra_media?: Array<{ url: string; alt_text?: string }>;
+        options_definition?: Record<string, string[]>;
+        specifications?: Record<string, string>;
+        variants?: any[];
       };
       master_product_id?: number;
       variant_mapping?: Array<{

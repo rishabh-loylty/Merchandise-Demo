@@ -38,6 +38,7 @@ public class ReviewDecisionRequest {
     @AllArgsConstructor
     public static class CleanDataDto {
         private String title;
+        private String slug;
         private String description;
         @JsonProperty("brand_id")
         private Integer brandId;
@@ -49,9 +50,39 @@ public class ReviewDecisionRequest {
         /** Ordered list of staging_media IDs to copy as product media (CREATE_NEW). */
         @JsonProperty("selected_media_ids")
         private List<Integer> selectedMediaIds;
+        /** Additional image URLs to add to the master product (CREATE_NEW). Appended after selected_media. */
+        @JsonProperty("extra_media")
+        private List<ExtraMediaItemDto> extraMedia;
         /** Product-level options definition JSON (e.g. Color, Size) for CREATE_NEW. */
         @JsonProperty("options_definition")
-        private String optionsDefinition;
+        private Object optionsDefinition;
+        /** Product-level specifications JSON for CREATE_NEW. */
+        @JsonProperty("specifications")
+        private Object specifications;
+        private List<VariantDto> variants;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VariantDto {
+        @JsonProperty("staging_variant_id")
+        private Integer stagingVariantId;
+        @JsonProperty("raw_sku")
+        private String rawSku;
+        @JsonProperty("raw_price_minor")
+        private Long rawPriceMinor;
+        @JsonProperty("raw_options")
+        private java.util.Map<String, String> rawOptions;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ExtraMediaItemDto {
+        private String url;
+        @JsonProperty("alt_text")
+        private String altText;
     }
 
     @Data
