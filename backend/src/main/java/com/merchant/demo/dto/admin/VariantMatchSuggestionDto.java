@@ -16,6 +16,12 @@ public class VariantMatchSuggestionDto {
     @JsonProperty("staging_variant_id")
     private Integer stagingVariantId;
 
+    @JsonProperty("staging_sku")
+    private String stagingSku;
+
+    @JsonProperty("staging_price_minor")
+    private Long stagingPriceMinor;
+
     @JsonProperty("staging_options")
     private Map<String, String> stagingOptions;
 

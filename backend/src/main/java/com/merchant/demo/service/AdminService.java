@@ -272,8 +272,23 @@ public class AdminService {
             }
 
             Map<String, String> options = parseOptions(sv.getRawOptions());
+
+            // Try to match by options if no barcode/sku match found
+            if (suggestedId == null && !options.isEmpty()) {
+                String stagingKey = buildOptionsKey(options);
+                for (Variant mv : masterVariants) {
+                    Map<String, String> mvOptions = parseOptions(mv.getOptions());
+                    if (!mvOptions.isEmpty() && stagingKey.equals(buildOptionsKey(mvOptions))) {
+                        suggestedId = mv.getId();
+                        matchReason = "OPTIONS_MATCH";
+                        break;
+                    }
+                }
+            }
             matches.add(VariantMatchSuggestionDto.builder()
                     .stagingVariantId(sv.getId())
+                    .stagingSku(sv.getRawSku())
+                    .stagingPriceMinor(sv.getRawPriceMinor())
                     .stagingOptions(options)
                     .suggestedMasterVariantId(suggestedId)
                     .matchReason(matchReason)
@@ -479,12 +494,23 @@ public class AdminService {
                 : List.of();
 
         Set<Integer> stagingVariantIds = staging.getVariants().stream().map(StagingVariant::getId).collect(Collectors.toSet());
-        Set<Integer> mappedIds = mapping.stream().map(ReviewDecisionRequest.VariantMappingDto::getStagingVariantId).filter(Objects::nonNull).collect(Collectors.toSet());
-        if (!mappedIds.equals(stagingVariantIds) || mapping.size() != stagingVariantIds.size()) {
-            throw new IllegalArgumentException("variant_mapping must contain exactly one entry per staging variant (link or add new)");
+        Set<Integer> mappedStagingIds = mapping.stream()
+                .map(ReviewDecisionRequest.VariantMappingDto::getStagingVariantId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        // Allow partial mapping: mapped IDs must be a subset of actual staging variant IDs (admin may skip some)
+        if (!stagingVariantIds.containsAll(mappedStagingIds)) {
+            throw new IllegalArgumentException("variant_mapping contains staging variant IDs that don't belong to this staging product");
         }
+        // Also allow entries without a staging_variant_id (manually added variants)
+        List<ReviewDecisionRequest.VariantMappingDto> manualEntries = mapping.stream()
+                .filter(dto -> dto.getStagingVariantId() == null)
+                .toList();
 
+        // Process entries that reference a staging variant (link or add_new with staging context)
         for (ReviewDecisionRequest.VariantMappingDto dto : mapping) {
+            if (dto.getStagingVariantId() == null) continue; // handled below as manual entry
+
             StagingVariant sv = staging.getVariants().stream()
                     .filter(v -> v.getId().equals(dto.getStagingVariantId()))
                     .findFirst()
@@ -514,6 +540,67 @@ public class AdminService {
                         .status("ACTIVE")
                         .build());
                 createMerchantOffer(staging, sv, newVariant.getId());
+            }
+        }
+
+        // Process manually added variants (no staging_variant_id, only new_variant_attributes)
+        for (ReviewDecisionRequest.VariantMappingDto dto : manualEntries) {
+            Map<String, String> attrs = dto.getNewVariantAttributes() != null ? dto.getNewVariantAttributes() : Map.of();
+            if (attrs.isEmpty()) continue;
+            String internalSku = "MANUAL-" + staging.getId() + "-" + UUID.randomUUID().toString().substring(0, 8);
+            variantRepository.save(Variant.builder()
+                    .product(master)
+                    .internalSku(internalSku)
+                    .options(toJsonOptions(attrs))
+                    .isActive(true)
+                    .status("ACTIVE")
+                    .build());
+            // No merchant offer for manual variants (no staging variant to reference)
+        }
+
+        // --- Optionally add media to existing master product ---
+        ReviewDecisionRequest.CleanDataDto clean = request.getCleanData();
+        if (clean != null) {
+            // Figure out the next position for new images
+            List<Media> existingMedia = mediaRepository.findByProductIdOrderByPositionAsc(master.getId());
+            int nextPosition = existingMedia.stream().mapToInt(Media::getPosition).max().orElse(-1) + 1;
+            boolean setMainImage = (master.getImageUrl() == null || master.getImageUrl().isBlank());
+
+            List<Integer> selectedMediaIds = clean.getSelectedMediaIds() != null ? clean.getSelectedMediaIds() : List.of();
+            if (!selectedMediaIds.isEmpty()) {
+                List<StagingMedia> stagingMediaList = stagingMediaRepository.findByIdInAndStagingProduct_Id(selectedMediaIds, staging.getId());
+                Map<Integer, StagingMedia> byId = stagingMediaList.stream().collect(Collectors.toMap(StagingMedia::getId, m -> m));
+                for (Integer smId : selectedMediaIds) {
+                    StagingMedia sm = byId.get(smId);
+                    if (sm == null) continue;
+                    if (setMainImage) {
+                        master.setImageUrl(sm.getSourceUrl());
+                        productRepository.save(master);
+                        setMainImage = false;
+                    }
+                    mediaRepository.save(Media.builder()
+                            .productId(master.getId())
+                            .srcUrl(sm.getSourceUrl())
+                            .altText(sm.getAltText())
+                            .position(nextPosition++)
+                            .build());
+                }
+            }
+
+            List<ReviewDecisionRequest.ExtraMediaItemDto> extraMedia = clean.getExtraMedia() != null ? clean.getExtraMedia() : List.of();
+            for (ReviewDecisionRequest.ExtraMediaItemDto item : extraMedia) {
+                if (item == null || item.getUrl() == null || !StringUtils.hasText(item.getUrl().trim())) continue;
+                if (setMainImage) {
+                    master.setImageUrl(item.getUrl().trim());
+                    productRepository.save(master);
+                    setMainImage = false;
+                }
+                mediaRepository.save(Media.builder()
+                        .productId(master.getId())
+                        .srcUrl(item.getUrl().trim())
+                        .altText(StringUtils.hasText(item.getAltText()) ? item.getAltText().trim() : null)
+                        .position(nextPosition++)
+                        .build());
             }
         }
 

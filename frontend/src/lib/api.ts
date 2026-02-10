@@ -236,7 +236,7 @@ class ApiClient {
     body: {
       action: string;
       clean_data?: {
-        title: string;
+        title?: string;
         slug?: string;
         description?: string;
         brand_id?: number;
@@ -250,7 +250,7 @@ class ApiClient {
       };
       master_product_id?: number;
       variant_mapping?: Array<{
-        staging_variant_id: number;
+        staging_variant_id?: number;
         master_variant_id?: number | null;
         new_variant_attributes?: Record<string, string>;
       }>;

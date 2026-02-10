@@ -32,7 +32,8 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { ArrowLeft, Loader2, Search, CheckCircle2, XCircle, Plus, Layers, FolderTree } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { ArrowLeft, ArrowRight, Loader2, Search, CheckCircle2, XCircle, Plus, Layers, FolderTree, Link2, ImagePlus, SkipForward, Pencil } from "lucide-react";
 import useSWR from "swr";
 import { toast } from "sonner";
 
@@ -47,6 +48,19 @@ function generateSlug(name: string): string {
 }
 
 type Flow = "match" | "create" | "reject";
+interface LinkChoice { type: "link"; masterVariantId: number }
+interface AddNewChoice { type: "add_new"; attributes: Record<string, string> }
+interface SkipChoice { type: "skip" }
+type VariantRowChoice = LinkChoice | AddNewChoice | SkipChoice;
+
+/** Normalize options to a comparable key, e.g. "color=pink|size=s" */
+function optionsKey(opts: Record<string, string>): string {
+  return Object.entries(opts)
+    .filter(([k]) => k !== "SKU")
+    .map(([k, v]) => `${k.toLowerCase().trim()}=${v.toLowerCase().trim()}`)
+    .sort()
+    .join("|");
+}
 
 export default function AdminReviewDetailPage() {
   const params = useParams();
@@ -166,8 +180,13 @@ export default function AdminReviewDetailPage() {
   };
 
   const [masterVariants, setMasterVariants] = React.useState<Array<{ id: number; internal_sku: string; gtin: string | null; options: Record<string, string> }>>([]);
-  type VariantRowChoice = { type: "link"; masterVariantId: number | null } | { type: "add_new"; attributes: Record<string, string> };
   const [variantChoices, setVariantChoices] = React.useState<Record<number, VariantRowChoice>>({});
+  const [linkOptionsDefinition, setLinkOptionsDefinition] = React.useState<Option[]>([]);
+  const [editingVariantId, setEditingVariantId] = React.useState<number | null>(null);
+  const [linkMediaIds, setLinkMediaIds] = React.useState<number[]>([]);
+  const [linkExtraMedia, setLinkExtraMedia] = React.useState<Array<{ url: string; alt_text?: string }>>([]);
+  const [linkExtraUrl, setLinkExtraUrl] = React.useState("");
+  const [linkExtraAlt, setLinkExtraAlt] = React.useState("");
 
   React.useEffect(() => {
     if (detail) {
@@ -222,6 +241,10 @@ export default function AdminReviewDetailPage() {
     setVariantMatch(null);
     setMasterVariants([]);
     setVariantChoices({});
+    setLinkOptionsDefinition([]);
+    setEditingVariantId(null);
+    setLinkMediaIds([]);
+    setLinkExtraMedia([]);
     try {
       const [match, variants] = await Promise.all([
         apiClient.getVariantMatch(stagingId, masterId),
@@ -229,6 +252,8 @@ export default function AdminReviewDetailPage() {
       ]);
       setVariantMatch(match);
       setMasterVariants(variants);
+
+      // Build initial variant choices
       const initial: Record<number, VariantRowChoice> = {};
       match.matches.forEach((m: { staging_variant_id: number; suggested_master_variant_id: number | null; staging_options: Record<string, string> }) => {
         if (m.suggested_master_variant_id != null) {
@@ -238,6 +263,29 @@ export default function AdminReviewDetailPage() {
         }
       });
       setVariantChoices(initial);
+
+      // Build merged options definition from existing master + incoming staging
+      const mergedMap: Record<string, Set<string>> = {};
+      for (const mv of variants) {
+        if (mv.options) {
+          for (const [k, v] of Object.entries(mv.options)) {
+            if (!mergedMap[k]) mergedMap[k] = new Set();
+            mergedMap[k].add(v);
+          }
+        }
+      }
+      for (const m of match.matches) {
+        if (m.staging_options) {
+          for (const [k, v] of Object.entries(m.staging_options)) {
+            if (k === "SKU") continue;
+            if (!mergedMap[k]) mergedMap[k] = new Set();
+            mergedMap[k].add(String(v));
+          }
+        }
+      }
+      setLinkOptionsDefinition(
+        Object.entries(mergedMap).map(([name, vals]) => ({ name, values: Array.from(vals) }))
+      );
     } catch (e) {
       toast.error("Failed to load variant match or master variants");
       setVariantMatch(null);
@@ -345,38 +393,127 @@ export default function AdminReviewDetailPage() {
   };
 
 
+  const addLinkExtraMedia = () => {
+    const url = linkExtraUrl.trim();
+    if (!url) { toast.error("Enter an image URL"); return; }
+    try { new URL(url); } catch { toast.error("Enter a valid URL"); return; }
+    setLinkExtraMedia((prev) => [...prev, { url, alt_text: linkExtraAlt.trim() || undefined }]);
+    setLinkExtraUrl("");
+    setLinkExtraAlt("");
+  };
+
+  const removeLinkExtraMedia = (index: number) => {
+    setLinkExtraMedia((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const toggleLinkMedia = (id: number) => {
+    setLinkMediaIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  /** Compute the cross-product of current linkOptionsDefinition */
+  const computeLinkCrossProduct = React.useCallback((): Record<string, string>[] => {
+    const valid = linkOptionsDefinition.filter((o) => o.name.trim() && o.values.length > 0);
+    if (valid.length === 0) return [];
+    return valid.reduce<Record<string, string>[]>(
+      (acc, opt) => {
+        if (acc.length === 0) return opt.values.map((v) => ({ [opt.name]: v }));
+        const result: Record<string, string>[] = [];
+        for (const existing of acc) {
+          for (const val of opt.values) {
+            result.push({ ...existing, [opt.name]: val });
+          }
+        }
+        return result;
+      },
+      []
+    );
+  }, [linkOptionsDefinition]);
+
+  /** Identify additional variants from the options editor that don't exist on master and aren't covered by staging add_new */
+  const computeAdditionalVariants = React.useCallback((): Record<string, string>[] => {
+    const crossProduct = computeLinkCrossProduct();
+    if (crossProduct.length === 0) return [];
+
+    // Keys of existing master variants
+    const existingKeys = new Set(masterVariants.map((mv) => optionsKey(mv.options || {})));
+
+    // Keys of staging variants being added as new
+    const stagingAddNewKeys = new Set<string>();
+    Object.values(variantChoices).forEach((c) => {
+      if (c.type === "add_new") stagingAddNewKeys.add(optionsKey(c.attributes));
+    });
+
+    return crossProduct.filter((combo) => {
+      const key = optionsKey(combo);
+      return key && !existingKeys.has(key) && !stagingAddNewKeys.has(key);
+    });
+  }, [computeLinkCrossProduct, masterVariants, variantChoices]);
+
   const handleSubmitLinkExisting = async () => {
     if (selectedMasterId == null || !variantMatch?.matches?.length) {
       toast.error("Select a master product and ensure variant match is loaded");
       return;
     }
-    const stagingIds = variantMatch.matches.map((m: any) => m.staging_variant_id);
-    const missing = stagingIds.filter((id: number) => {
-      const c = variantChoices[id];
-      if (!c) return true;
-      if (c.type === "link" && c.masterVariantId == null) return true;
-      return false;
-    });
+    const stagingIds: number[] = variantMatch.matches.map((m: any) => m.staging_variant_id);
+    // Check that every staging variant has a choice assigned
+    const missing = stagingIds.filter((id: number) => !variantChoices[id]);
     if (missing.length > 0) {
-      toast.error("Choose link (select a master variant) or add new for every staging variant");
+      toast.error("Choose an action (link, add new, or skip) for every incoming variant");
       return;
     }
-    const variant_mapping = stagingIds.map((stagingVariantId: number) => {
-      const choice = variantChoices[stagingVariantId];
-      if (choice.type === "link" && choice.masterVariantId != null) {
-        return { staging_variant_id: stagingVariantId, master_variant_id: choice.masterVariantId };
+
+    // Check for duplicates: staging "add_new" that matches an existing master variant
+    for (const svId of stagingIds) {
+      const choice = variantChoices[svId];
+      if (choice?.type === "add_new") {
+        const key = optionsKey(choice.attributes);
+        const matchedMaster = masterVariants.find((mv) => optionsKey(mv.options || {}) === key);
+        if (matchedMaster) {
+          toast.error(
+            `Variant #${stagingIds.indexOf(svId) + 1} is set to "Add as new" but already exists on the master product. Please link it instead or skip it.`
+          );
+          return;
+        }
       }
-      return {
-        staging_variant_id: stagingVariantId,
-        new_variant_attributes: choice.type === "add_new" ? choice.attributes : {},
-      };
-    });
+    }
+
+    // Build mapping: only include non-skipped staging variants
+    const variant_mapping: Array<{
+      staging_variant_id?: number;
+      master_variant_id?: number | null;
+      new_variant_attributes?: Record<string, string>;
+    }> = [];
+    for (const svId of stagingIds) {
+      const choice = variantChoices[svId]!;
+      if (choice.type === "skip") continue;
+      if (choice.type === "link") {
+        variant_mapping.push({ staging_variant_id: svId, master_variant_id: choice.masterVariantId });
+      } else {
+        variant_mapping.push({ staging_variant_id: svId, new_variant_attributes: choice.attributes });
+      }
+    }
+    // Add additional variants from options editor (not from staging)
+    const additional = computeAdditionalVariants();
+    for (const combo of additional) {
+      variant_mapping.push({ new_variant_attributes: combo });
+    }
+    if (variant_mapping.length === 0) {
+      toast.error("No variants to link or create. Adjust your options or variant mapping.");
+      return;
+    }
+    const hasMedia = linkMediaIds.length > 0 || linkExtraMedia.length > 0;
     setSubmitting(true);
     try {
       await apiClient.submitReviewDecision(stagingId, {
         action: "LINK_EXISTING",
         master_product_id: selectedMasterId,
         variant_mapping,
+        ...(hasMedia ? {
+          clean_data: {
+            selected_media_ids: linkMediaIds.length ? linkMediaIds : undefined,
+            extra_media: linkExtraMedia.length ? linkExtraMedia : undefined,
+          },
+        } : {}),
       });
       toast.success("Linked to master product and approved");
       router.push("/admin/queue");
@@ -576,111 +713,446 @@ export default function AdminReviewDetailPage() {
         </div>
 
         {flow === "match" && (
-          <Card className="mt-6" padding="default">
-            <h3 className="font-semibold text-foreground mb-4">Link to existing master product</h3>
-            <div className="flex gap-2 mb-4">
-              <Input
-                placeholder="Search by title..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearchMaster()}
-              />
-              <Button onClick={handleSearchMaster} disabled={searching}>
-                {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                Search
-              </Button>
-            </div>
-            {searchResults.length > 0 && (
-              <ul className="space-y-2 mb-4">
-                {searchResults.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectMaster(p.id)}
-                      className={`w-full text-left rounded-lg border px-4 py-2 transition-colors ${
-                        selectedMasterId === p.id
-                          ? "border-primary bg-primary/5"
-                          : "border-border hover:bg-muted/50"
-                      }`}
-                    >
-                      <span className="font-medium">{p.title}</span>
-                      <span className="text-muted-foreground text-sm ml-2">{p.brand}</span>
-                      <span className="text-muted-foreground text-xs ml-2">({p.variant_count} variants)</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {variantMatch && (
-              <div className="border-t border-border pt-4">
-                <p className="text-sm font-medium text-foreground mb-2">Map each staging variant: link to existing or add new</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm border-collapse">
-                    <thead>
-                      <tr className="border-b border-border">
-                        <th className="text-left py-2 pr-2">Staging (SKU / options)</th>
-                        <th className="text-left py-2 pr-2">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {variantMatch.matches.map((m: any) => {
-                        const choice = variantChoices[m.staging_variant_id];
-                        return (
-                          <tr key={m.staging_variant_id} className="border-b border-border">
-                            <td className="py-2 pr-2 align-top">
-                              <span className="font-mono text-xs">{m.staging_options?.SKU ?? m.staging_variant_id}</span>
-                              {m.staging_options && Object.keys(m.staging_options).filter((k) => k !== "SKU").length > 0 && (
-                                <span className="text-muted-foreground ml-1">
-                                  {JSON.stringify(m.staging_options)}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2">
-                              <div className="flex flex-wrap gap-2 items-start">
-                                <Select
-                                  value={choice?.type === "link" && choice.masterVariantId != null ? String(choice.masterVariantId) : "add_new"}
-                                  onValueChange={(v) => {
-                                    if (v === "add_new") {
-                                      setVariantChoices((prev) => ({ ...prev, [m.staging_variant_id]: { type: "add_new", attributes: m.staging_options || {} } }));
-                                    } else {
-                                      setVariantChoices((prev) => ({ ...prev, [m.staging_variant_id]: { type: "link", masterVariantId: Number(v) } }));
-                                    }
-                                  }}
-                                >
-                                  <SelectTrigger className="w-[200px]">
-                                    <SelectValue placeholder="Link or add new..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="add_new">+ Add new variant</SelectItem>
-                                    {masterVariants.map((mv) => (
-                                      <SelectItem key={mv.id} value={String(mv.id)}>
-                                        Link: {mv.internal_sku} {mv.options && Object.keys(mv.options).length ? ` (${JSON.stringify(mv.options)})` : ""}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {choice?.type === "add_new" && (
-                                  <span className="text-xs text-muted-foreground">New variant will use staging options</span>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <Button
-                  className="mt-4"
-                  onClick={handleSubmitLinkExisting}
-                  disabled={submitting}
-                >
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Approve & link
+          <div className="mt-6 space-y-6">
+            {/* Step 1: Search & select master */}
+            <Card padding="default">
+              <h3 className="font-semibold text-foreground mb-4">
+                <span className="inline-flex items-center gap-2"><Link2 className="h-5 w-5" /> Step 1: Find &amp; select master product</span>
+              </h3>
+              <div className="flex gap-2 mb-4">
+                <Input
+                  placeholder="Search by title..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearchMaster()}
+                />
+                <Button onClick={handleSearchMaster} disabled={searching}>
+                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Search
                 </Button>
               </div>
+              {searchResults.length > 0 && (
+                <ul className="space-y-2">
+                  {searchResults.map((p) => (
+                    <li key={p.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectMaster(p.id)}
+                        className={`w-full text-left rounded-lg border px-4 py-3 transition-colors flex items-center gap-3 ${
+                          selectedMasterId === p.id
+                            ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                            : "border-border hover:bg-muted/50"
+                        }`}
+                      >
+                        {p.image_url && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.image_url} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0 border" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium">{p.title}</span>
+                          {p.brand && <span className="text-muted-foreground text-sm ml-2">{p.brand}</span>}
+                          <div className="text-muted-foreground text-xs">{p.variant_count} variant{p.variant_count !== 1 ? "s" : ""}</div>
+                        </div>
+                        {selectedMasterId === p.id && <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+
+            {/* Step 2: Incoming data overview (shown once master is selected) */}
+            {variantMatch && (() => {
+              const matches: any[] = variantMatch.matches;
+              // Build aggregated incoming options from staging variants
+              const incomingOptionsMap: Record<string, Set<string>> = {};
+              matches.forEach((m: any) => {
+                if (m.staging_options) {
+                  Object.entries(m.staging_options).forEach(([k, v]) => {
+                    if (k === "SKU") return;
+                    if (!incomingOptionsMap[k]) incomingOptionsMap[k] = new Set();
+                    incomingOptionsMap[k].add(String(v));
+                  });
+                }
+              });
+              const incomingOptions = Object.entries(incomingOptionsMap).map(([name, vals]) => ({
+                name,
+                values: Array.from(vals),
+              }));
+
+              // Build existing master options from master variants
+              const existingOptionsMap: Record<string, Set<string>> = {};
+              masterVariants.forEach((mv) => {
+                if (mv.options) {
+                  Object.entries(mv.options).forEach(([k, v]) => {
+                    if (!existingOptionsMap[k]) existingOptionsMap[k] = new Set();
+                    existingOptionsMap[k].add(v);
+                  });
+                }
+              });
+              const existingOptions = Object.entries(existingOptionsMap).map(([name, vals]) => ({
+                name,
+                values: Array.from(vals),
+              }));
+
+              const selectedMaster = searchResults.find((p: any) => p.id === selectedMasterId);
+
+              return (
+                <Card padding="default">
+                  <h3 className="font-semibold text-foreground mb-4">
+                    <span className="inline-flex items-center gap-2"><Layers className="h-5 w-5" /> Step 2: Review incoming data</span>
+                  </h3>
+
+                  {/* Side-by-side comparison */}
+                  <div className="grid gap-6 md:grid-cols-2 mb-6">
+                    {/* Incoming (staging) */}
+                    <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
+                      <h4 className="text-sm font-semibold text-blue-600 mb-3 flex items-center gap-1.5">
+                        <ArrowRight className="h-4 w-4" /> Incoming from merchant
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Title:</span>{" "}
+                          <span className="font-medium">{detail.raw_title}</span>
+                        </div>
+                        {detail.raw_vendor && (
+                          <div>
+                            <span className="text-muted-foreground">Vendor:</span>{" "}
+                            <span>{detail.raw_vendor}</span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-muted-foreground">Variants:</span>{" "}
+                          <Badge variant="info" size="sm">{matches.length}</Badge>
+                        </div>
+                        {incomingOptions.length > 0 && (
+                          <div>
+                            <span className="text-muted-foreground block mb-1">Options:</span>
+                            <div className="space-y-1.5">
+                              {incomingOptions.map((opt) => (
+                                <div key={opt.name} className="flex flex-wrap items-center gap-1">
+                                  <span className="text-xs font-medium text-foreground min-w-[60px]">{opt.name}:</span>
+                                  {opt.values.map((v) => (
+                                    <Badge key={v} variant="info" size="sm">{v}</Badge>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {detail.media && detail.media.length > 0 && (
+                          <div>
+                            <span className="text-muted-foreground">Images:</span>{" "}
+                            <span>{detail.media.length}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Existing master */}
+                    <div className="rounded-lg border border-border bg-muted/30 p-4">
+                      <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
+                        <Layers className="h-4 w-4" /> Existing master product
+                      </h4>
+                      <div className="space-y-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Title:</span>{" "}
+                          <span className="font-medium">{selectedMaster?.title ?? "—"}</span>
+                        </div>
+                        {selectedMaster?.brand && (
+                          <div>
+                            <span className="text-muted-foreground">Brand:</span>{" "}
+                            <span>{selectedMaster.brand}</span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-muted-foreground">Current variants:</span>{" "}
+                          <Badge variant="muted" size="sm">{masterVariants.length}</Badge>
+                        </div>
+                        {existingOptions.length > 0 && (
+                          <div>
+                            <span className="text-muted-foreground block mb-1">Options:</span>
+                            <div className="space-y-1.5">
+                              {existingOptions.map((opt) => (
+                                <div key={opt.name} className="flex flex-wrap items-center gap-1">
+                                  <span className="text-xs font-medium text-foreground min-w-[60px]">{opt.name}:</span>
+                                  {opt.values.map((v) => (
+                                    <Badge key={v} variant="secondary" size="sm">{v}</Badge>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })()}
+
+            {/* Step 3: Options Definition */}
+            {variantMatch && (
+              <Card padding="default">
+                <h3 className="font-semibold text-foreground mb-1">
+                  <span className="inline-flex items-center gap-2"><Pencil className="h-5 w-5" /> Step 3: Options Definition</span>
+                </h3>
+                <p className="text-xs text-muted-foreground mb-1">
+                  Edit the master product&apos;s options. Add new values to create additional variants, or remove values to keep the catalog clean.
+                  Variants are auto-generated from the cross-product of all options below.
+                </p>
+                <OptionsEditor
+                  value={linkOptionsDefinition}
+                  onChange={setLinkOptionsDefinition}
+                />
+
+                {/* Cross-product preview */}
+                {(() => {
+                  const crossProduct = computeLinkCrossProduct();
+                  if (crossProduct.length === 0) return null;
+
+                  const existingKeys = new Set(masterVariants.map((mv) => optionsKey(mv.options || {})));
+                  const stagingAddNewKeys = new Set<string>();
+                  const stagingLinkedKeys = new Set<string>();
+                  Object.entries(variantChoices).forEach(([, c]) => {
+                    if (c.type === "add_new") stagingAddNewKeys.add(optionsKey(c.attributes));
+                    if (c.type === "link") {
+                      const mv = masterVariants.find((m) => m.id === (c as LinkChoice).masterVariantId);
+                      if (mv) stagingLinkedKeys.add(optionsKey(mv.options || {}));
+                    }
+                  });
+
+                  const validOptions = linkOptionsDefinition.filter((o) => o.name.trim() && o.values.length > 0);
+                  const additionalCount = crossProduct.filter((combo) => {
+                    const key = optionsKey(combo);
+                    return key && !existingKeys.has(key) && !stagingAddNewKeys.has(key);
+                  }).length;
+
+                  return (
+                    <div className="mt-4 pt-4 border-t border-border">
+                      <h4 className="text-sm font-semibold text-foreground mb-2">
+                        Variant Preview ({crossProduct.length} total variant{crossProduct.length !== 1 ? "s" : ""} from options)
+                      </h4>
+                      {additionalCount > 0 && (
+                        <p className="text-xs text-purple-600 mb-2">
+                          {additionalCount} additional variant{additionalCount !== 1 ? "s" : ""} will be created from your options edits (no merchant offer).
+                        </p>
+                      )}
+                      <div className="overflow-x-auto border rounded-lg max-h-72 overflow-y-auto">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted sticky top-0">
+                            <tr>
+                              <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">#</th>
+                              {validOptions.map((opt) => (
+                                <th key={opt.name} className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">{opt.name}</th>
+                              ))}
+                              <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {crossProduct.slice(0, 100).map((combo, i) => {
+                              const key = optionsKey(combo);
+                              const isExisting = existingKeys.has(key);
+                              const isFromStaging = stagingAddNewKeys.has(key);
+                              const isLinked = stagingLinkedKeys.has(key);
+                              const isAdditional = !isExisting && !isFromStaging;
+                              return (
+                                <tr key={i} className={`border-t ${isAdditional ? "bg-purple-500/5" : isFromStaging ? "bg-blue-500/5" : ""}`}>
+                                  <td className="py-1.5 px-3 text-xs text-muted-foreground">{i + 1}</td>
+                                  {validOptions.map((opt) => (
+                                    <td key={opt.name} className="py-1.5 px-3">{combo[opt.name] || "—"}</td>
+                                  ))}
+                                  <td className="py-1.5 px-3">
+                                    {isExisting && isLinked ? (
+                                      <Badge variant="success" size="sm">Linked</Badge>
+                                    ) : isExisting ? (
+                                      <Badge variant="secondary" size="sm">Existing</Badge>
+                                    ) : isFromStaging ? (
+                                      <Badge variant="info" size="sm">New (staging)</Badge>
+                                    ) : (
+                                      <Badge variant="default" size="sm">New (options)</Badge>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {crossProduct.length > 100 && (
+                              <tr className="border-t">
+                                <td colSpan={validOptions.length + 2} className="py-2 px-3 text-xs text-muted-foreground text-center">
+                                  ... and {crossProduct.length - 100} more variants
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </Card>
             )}
-          </Card>
+
+            {/* Step 4: Add images (optional) */}
+            {variantMatch && (
+              <Card padding="default">
+                <h3 className="font-semibold text-foreground mb-1">
+                  <span className="inline-flex items-center gap-2"><ImagePlus className="h-5 w-5" /> Step 4: Add images (optional)</span>
+                </h3>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Select from this merchant&apos;s staging images and/or add by URL. These will be appended to the master product&apos;s existing images.
+                </p>
+
+                {detail.media && detail.media.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {detail.media.map((m: { id: number; source_url: string; alt_text?: string | null }) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleLinkMedia(m.id)}
+                        className={`relative rounded-lg border-2 overflow-hidden w-20 h-20 shrink-0 block ${
+                          linkMediaIds.includes(m.id) ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-muted-foreground"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={m.source_url} alt={m.alt_text || ""} className="w-full h-full object-cover" />
+                        {linkMediaIds.includes(m.id) && (
+                          <span className="absolute bottom-0 right-0 bg-primary text-primary-foreground text-xs px-1">
+                            {linkMediaIds.indexOf(m.id) + 1}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-foreground">Add by URL</p>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <Input
+                      placeholder="https://example.com/image.jpg"
+                      value={linkExtraUrl}
+                      onChange={(e) => setLinkExtraUrl(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addLinkExtraMedia())}
+                      className="flex-1 min-w-[200px]"
+                    />
+                    <Input
+                      placeholder="Alt text (optional)"
+                      value={linkExtraAlt}
+                      onChange={(e) => setLinkExtraAlt(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && addLinkExtraMedia()}
+                      className="w-40"
+                    />
+                    <Button type="button" variant="secondary" size="sm" onClick={addLinkExtraMedia} disabled={!linkExtraUrl.trim()}>
+                      <Plus className="h-4 w-4 mr-1" /> Add
+                    </Button>
+                  </div>
+                  {linkExtraMedia.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {linkExtraMedia.map((item, idx) => (
+                        <div key={idx} className="relative rounded-lg border-2 border-border overflow-hidden w-20 h-20 shrink-0 group">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={item.url} alt={item.alt_text || ""} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => removeLinkExtraMedia(idx)}
+                            className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded-bl p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                            aria-label="Remove image"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )}
+
+            {/* Step 5: Summary & submit */}
+            {variantMatch && (() => {
+              const matches: any[] = variantMatch.matches;
+              const linkedCount = matches.filter((m: any) => variantChoices[m.staging_variant_id]?.type === "link").length;
+              const addNewCount = matches.filter((m: any) => variantChoices[m.staging_variant_id]?.type === "add_new").length;
+              const skippedCount = matches.filter((m: any) => variantChoices[m.staging_variant_id]?.type === "skip").length;
+              const additional = computeAdditionalVariants();
+              const additionalCount = additional.length;
+              const imageCount = linkMediaIds.length + linkExtraMedia.length;
+              const totalAfter = masterVariants.length + addNewCount + additionalCount;
+              const actionCount = linkedCount + addNewCount + additionalCount;
+
+              // Check for duplicate warnings
+              const hasDuplicates = matches.some((m: any) => {
+                const c = variantChoices[m.staging_variant_id];
+                if (c?.type !== "add_new") return false;
+                return masterVariants.some((mv) => optionsKey(mv.options || {}) === optionsKey(c.attributes));
+              });
+
+              return (
+                <Card padding="default" className="border-primary/30 bg-primary/5">
+                  <h3 className="font-semibold text-foreground mb-2">Step 5: Confirm & approve</h3>
+                  {hasDuplicates && (
+                    <div className="mb-3 p-2 rounded-md bg-warning/10 border border-warning/30 text-warning text-sm flex items-center gap-2">
+                      <XCircle className="h-4 w-4 shrink-0" />
+                      Some variants marked &quot;Add as new&quot; duplicate existing master variants. Fix these before approving.
+                    </div>
+                  )}
+                  <ul className="text-sm space-y-1.5 mb-4">
+                    <li className="flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-muted-foreground" />
+                      Master product will have <strong>{totalAfter}</strong> variant{totalAfter !== 1 ? "s" : ""} after linking
+                      <span className="text-muted-foreground">
+                        ({masterVariants.length} existing
+                        {addNewCount > 0 ? ` + ${addNewCount} from staging` : ""}
+                        {additionalCount > 0 ? ` + ${additionalCount} from options` : ""})
+                      </span>
+                    </li>
+                    {linkedCount > 0 && (
+                      <li className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <strong>{linkedCount}</strong> variant{linkedCount !== 1 ? "s" : ""} linked to existing — merchant offers created
+                      </li>
+                    )}
+                    {addNewCount > 0 && (
+                      <li className="flex items-center gap-2">
+                        <Plus className="h-4 w-4 text-blue-500" />
+                        <strong>{addNewCount}</strong> new variant{addNewCount !== 1 ? "s" : ""} from staging — added to master + merchant offers created
+                      </li>
+                    )}
+                    {additionalCount > 0 && (
+                      <li className="flex items-center gap-2">
+                        <Pencil className="h-4 w-4 text-purple-500" />
+                        <strong>{additionalCount}</strong> additional variant{additionalCount !== 1 ? "s" : ""} from options — added to master (no merchant offer)
+                      </li>
+                    )}
+                    {skippedCount > 0 && (
+                      <li className="flex items-center gap-2 text-muted-foreground">
+                        <SkipForward className="h-4 w-4" />
+                        <strong>{skippedCount}</strong> incoming variant{skippedCount !== 1 ? "s" : ""} skipped
+                      </li>
+                    )}
+                    {imageCount > 0 && (
+                      <li className="flex items-center gap-2">
+                        <ImagePlus className="h-4 w-4 text-purple-500" />
+                        <strong>{imageCount}</strong> image{imageCount !== 1 ? "s" : ""} will be added to master product
+                      </li>
+                    )}
+                    {actionCount === 0 && (
+                      <li className="text-muted-foreground">No variant changes to apply.</li>
+                    )}
+                  </ul>
+                  <Button
+                    onClick={handleSubmitLinkExisting}
+                    disabled={submitting || actionCount === 0 || hasDuplicates}
+                    className="gap-2"
+                    size="lg"
+                  >
+                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                    Approve & link to master
+                  </Button>
+                </Card>
+              );
+            })()}
+          </div>
         )}
 
         {flow === "create" && (

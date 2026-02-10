@@ -4,7 +4,6 @@ import * as React from "react";
 import { ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
@@ -76,15 +75,15 @@ export function CategoryMultiSelect({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
+        <div
           role="combobox"
           aria-expanded={open}
           aria-haspopup="listbox"
           aria-label={label}
+          tabIndex={0}
           className={cn(
-            "min-h-10 w-full justify-between gap-2 text-left font-normal",
+            "flex min-h-10 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2 text-left text-sm font-medium transition-all duration-200",
+            "hover:bg-muted hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
             !value.length && "text-muted-foreground",
             className
           )}
@@ -109,7 +108,7 @@ export function CategoryMultiSelect({
             )}
           </span>
           <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-        </Button>
+        </div>
       </PopoverTrigger>
       <PopoverContent
         className="w-[var(--radix-popover-trigger-width)] p-0"
