@@ -225,15 +225,13 @@ class AdminControllerIntegrationTest {
 
         ReviewDecisionRequest req = new ReviewDecisionRequest();
         req.setAction(ReviewDecisionRequest.ACTION_CREATE_NEW);
-        req.setCleanData(new ReviewDecisionRequest.CleanDataDto(
-                "Nike New Sneakers - Men's",
-                "Description",
-                brand.getId(),
-                1,
-                null,
-                null,
-                null
-        ));
+        ReviewDecisionRequest.CleanDataDto cleanData = new ReviewDecisionRequest.CleanDataDto();
+        cleanData.setTitle("Nike New Sneakers - Men's");
+        cleanData.setDescription("Description");
+        cleanData.setBrandId(brand.getId());
+        cleanData.setCategoryId(1);
+        // Set any other required fields here if needed
+        req.setCleanData(cleanData);
 
         mockMvc.perform(post("/api/admin/review/{stagingId}/decision", sp.getId())
                         .contentType(MediaType.APPLICATION_JSON)
