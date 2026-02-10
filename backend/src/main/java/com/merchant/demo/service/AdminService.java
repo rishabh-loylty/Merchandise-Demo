@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.Comparator;
 
 @Service
 @RequiredArgsConstructor
@@ -30,6 +31,10 @@ public class AdminService {
     private final VariantRepository variantRepository;
     private final BrandRepository brandRepository;
     private final MerchantOfferRepository merchantOfferRepository;
+    private final MediaRepository mediaRepository;
+    private final StagingMediaRepository stagingMediaRepository;
+    private final CategoryRepository categoryRepository;
+    private final ProductCategoryRepository productCategoryRepository;
     private final ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
@@ -40,8 +45,17 @@ public class AdminService {
                 .map(Merchant::getName)
                 .orElse("");
         String imageUrl = null;
+        List<StagingDetailDto.StagingMediaItemDto> mediaList = new ArrayList<>();
         if (staging.getMedia() != null && !staging.getMedia().isEmpty()) {
             imageUrl = staging.getMedia().get(0).getSourceUrl();
+            staging.getMedia().stream()
+                    .sorted(Comparator.comparing(m -> m.getPosition() != null ? m.getPosition() : 0))
+                    .forEach(m -> mediaList.add(StagingDetailDto.StagingMediaItemDto.builder()
+                            .id(m.getId())
+                            .sourceUrl(m.getSourceUrl())
+                            .altText(m.getAltText())
+                            .position(m.getPosition())
+                            .build()));
         }
         List<StagingDetailDto.StagingVariantSummaryDto> variants = staging.getVariants().stream()
                 .map(sv -> {
@@ -68,6 +82,7 @@ public class AdminService {
                 .suggestedProductId(staging.getSuggestedProductId())
                 .createdAt(staging.getCreatedAt())
                 .imageUrl(imageUrl)
+                .media(mediaList)
                 .variants(variants)
                 .build();
     }
@@ -164,6 +179,45 @@ public class AdminService {
     }
 
     @Transactional(readOnly = true)
+    public List<BrandListItemDto> listBrands() {
+        return brandRepository.findAll().stream()
+                .filter(b -> b.getIsActive() == null || Boolean.TRUE.equals(b.getIsActive()))
+                .map(b -> BrandListItemDto.builder()
+                        .id(b.getId())
+                        .name(b.getName())
+                        .slug(b.getSlug())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<CategoryListItemDto> listCategories() {
+        return categoryRepository.findAll().stream()
+                .filter(c -> c.getIsActive() == null || Boolean.TRUE.equals(c.getIsActive()))
+                .map(c -> CategoryListItemDto.builder()
+                        .id(c.getId())
+                        .name(c.getName())
+                        .slug(c.getSlug())
+                        .parentId(c.getParentId())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<MasterVariantDto> getProductVariants(Integer productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new NoSuchElementException("Product not found: " + productId));
+        return variantRepository.findByProductId(product.getId()).stream()
+                .map(v -> MasterVariantDto.builder()
+                        .id(v.getId())
+                        .internalSku(v.getInternalSku())
+                        .gtin(v.getGtin())
+                        .options(parseOptions(v.getOptions()))
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public VariantMatchResponseDto getVariantMatchSuggestions(Integer stagingId, Integer targetMasterId) {
         StagingProduct staging = stagingProductRepository.findById(stagingId)
                 .orElseThrow(() -> new NoSuchElementException("Staging product not found: " + stagingId));
@@ -238,6 +292,10 @@ public class AdminService {
             throw new IllegalArgumentException("clean_data.title required for CREATE_NEW");
         }
 
+        String optionsDefinition = StringUtils.hasText(clean.getOptionsDefinition())
+                ? clean.getOptionsDefinition()
+                : staging.getRawOptionsDefinition();
+
         String slug = generateSlug(clean.getTitle());
         Product newProduct = productRepository.save(Product.builder()
                 .title(clean.getTitle())
@@ -245,7 +303,41 @@ public class AdminService {
                 .description(clean.getDescription())
                 .brandId(clean.getBrandId())
                 .status("ACTIVE")
+                .optionsDefinition(optionsDefinition)
                 .build());
+
+        List<Integer> selectedMediaIds = clean.getSelectedMediaIds() != null ? clean.getSelectedMediaIds() : List.of();
+        if (!selectedMediaIds.isEmpty()) {
+            List<StagingMedia> stagingMediaList = stagingMediaRepository.findByIdInAndStagingProduct_Id(selectedMediaIds, staging.getId());
+            if (stagingMediaList.size() != selectedMediaIds.size()) {
+                throw new IllegalArgumentException("All selected_media_ids must belong to this staging product");
+            }
+            Map<Integer, StagingMedia> byId = stagingMediaList.stream().collect(Collectors.toMap(StagingMedia::getId, m -> m));
+            String firstImageUrl = null;
+            for (int i = 0; i < selectedMediaIds.size(); i++) {
+                StagingMedia sm = byId.get(selectedMediaIds.get(i));
+                if (sm == null) continue;
+                if (firstImageUrl == null) firstImageUrl = sm.getSourceUrl();
+                mediaRepository.save(Media.builder()
+                        .productId(newProduct.getId())
+                        .srcUrl(sm.getSourceUrl())
+                        .altText(sm.getAltText())
+                        .position(i)
+                        .build());
+            }
+            if (firstImageUrl != null) {
+                newProduct.setImageUrl(firstImageUrl);
+                productRepository.save(newProduct);
+            }
+        }
+
+        List<Integer> categoryIds = clean.getCategoryIds() != null ? clean.getCategoryIds() : List.of();
+        for (Integer categoryId : categoryIds) {
+            productCategoryRepository.save(ProductCategory.builder()
+                    .productId(newProduct.getId())
+                    .categoryId(categoryId)
+                    .build());
+        }
 
         for (StagingVariant sv : staging.getVariants()) {
             String internalSku = StringUtils.hasText(sv.getRawSku())
@@ -292,6 +384,12 @@ public class AdminService {
                 ? request.getVariantMapping()
                 : List.of();
 
+        Set<Integer> stagingVariantIds = staging.getVariants().stream().map(StagingVariant::getId).collect(Collectors.toSet());
+        Set<Integer> mappedIds = mapping.stream().map(ReviewDecisionRequest.VariantMappingDto::getStagingVariantId).filter(Objects::nonNull).collect(Collectors.toSet());
+        if (!mappedIds.equals(stagingVariantIds) || mapping.size() != stagingVariantIds.size()) {
+            throw new IllegalArgumentException("variant_mapping must contain exactly one entry per staging variant (link or add new)");
+        }
+
         for (ReviewDecisionRequest.VariantMappingDto dto : mapping) {
             StagingVariant sv = staging.getVariants().stream()
                     .filter(v -> v.getId().equals(dto.getStagingVariantId()))
@@ -299,6 +397,10 @@ public class AdminService {
                     .orElseThrow(() -> new NoSuchElementException("Staging variant not found: " + dto.getStagingVariantId()));
 
             Integer masterVariantId = dto.getMasterVariantId();
+            Map<String, String> newAttrs = dto.getNewVariantAttributes() != null ? dto.getNewVariantAttributes() : Map.of();
+            if (masterVariantId != null && !newAttrs.isEmpty()) {
+                throw new IllegalArgumentException("Each variant_mapping entry must have either master_variant_id (link) or new_variant_attributes (add new), not both");
+            }
             if (masterVariantId != null) {
                 Variant mv = variantRepository.findById(masterVariantId).orElseThrow();
                 if (!mv.getProduct().getId().equals(master.getId())) {
@@ -306,12 +408,14 @@ public class AdminService {
                 }
                 createMerchantOffer(staging, sv, mv.getId());
             } else {
-                Map<String, String> attrs = dto.getNewVariantAttributes() != null ? dto.getNewVariantAttributes() : Map.of();
+                if (newAttrs.isEmpty()) {
+                    newAttrs = parseOptions(sv.getRawOptions());
+                }
                 String internalSku = "LINK-" + staging.getId() + "-" + sv.getId();
                 Variant newVariant = variantRepository.save(Variant.builder()
                         .product(master)
                         .internalSku(internalSku)
-                        .options(attrs.isEmpty() ? "{}" : toJsonOptions(attrs))
+                        .options(newAttrs.isEmpty() ? "{}" : toJsonOptions(newAttrs))
                         .isActive(true)
                         .status("ACTIVE")
                         .build());

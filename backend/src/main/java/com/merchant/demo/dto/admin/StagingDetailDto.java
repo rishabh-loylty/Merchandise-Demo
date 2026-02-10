@@ -51,8 +51,27 @@ public class StagingDetailDto {
     @JsonProperty("image_url")
     private String imageUrl;
 
+    /** Staging media for image picker (select + order when creating new product). */
+    @JsonProperty("media")
+    private List<StagingMediaItemDto> media;
+
     @JsonProperty("variants")
     private List<StagingVariantSummaryDto> variants;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StagingMediaItemDto {
+        @JsonProperty("id")
+        private Integer id;
+        @JsonProperty("source_url")
+        private String sourceUrl;
+        @JsonProperty("alt_text")
+        private String altText;
+        @JsonProperty("position")
+        private Integer position;
+    }
 
     @Data
     @Builder

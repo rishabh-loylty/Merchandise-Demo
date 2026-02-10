@@ -11,6 +11,9 @@ import type {
   MasterProductSearchItem,
   VariantMatchResponse,
   StagingDetail,
+  BrandListItem,
+  CategoryListItem,
+  MasterVariantDto,
 } from "./types";
 
 export const API_BASE_URL =
@@ -176,15 +179,35 @@ class ApiClient {
     );
   }
 
+  async getAdminBrands(): Promise<BrandListItem[]> {
+    return this.fetch<BrandListItem[]>("/api/admin/brands");
+  }
+
+  async getAdminCategories(): Promise<CategoryListItem[]> {
+    return this.fetch<CategoryListItem[]>("/api/admin/categories");
+  }
+
+  async getProductVariants(productId: number): Promise<MasterVariantDto[]> {
+    return this.fetch<MasterVariantDto[]>(`/api/admin/products/${productId}/variants`);
+  }
+
   async submitReviewDecision(
     stagingId: number,
     body: {
       action: string;
-      clean_data?: { title: string; description?: string; brand_id?: number; category_id?: number };
+      clean_data?: {
+        title: string;
+        description?: string;
+        brand_id?: number;
+        category_id?: number;
+        category_ids?: number[];
+        selected_media_ids?: number[];
+        options_definition?: string;
+      };
       master_product_id?: number;
       variant_mapping?: Array<{
         staging_variant_id: number;
-        master_variant_id: number | null;
+        master_variant_id?: number | null;
         new_variant_attributes?: Record<string, string>;
       }>;
       rejection_reason?: string;

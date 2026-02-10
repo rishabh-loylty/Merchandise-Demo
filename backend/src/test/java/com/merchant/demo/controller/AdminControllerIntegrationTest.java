@@ -67,8 +67,8 @@ class AdminControllerIntegrationTest {
     void setUp() {
         merchantOfferRepository.deleteAll();
         variantRepository.deleteAll();
+        stagingProductRepository.deleteAll(); // before products (staging_products.suggested_product_id FK)
         productRepository.deleteAll();
-        stagingProductRepository.deleteAll();
         merchantRepository.deleteAll();
         brandRepository.deleteAll();
 

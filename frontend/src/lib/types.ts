@@ -209,6 +209,13 @@ export interface StagingVariantSummary {
   raw_options: Record<string, string>;
 }
 
+export interface StagingMediaItem {
+  id: number;
+  source_url: string;
+  alt_text: string | null;
+  position: number | null;
+}
+
 export interface StagingDetail {
   staging_id: number;
   merchant_id: number;
@@ -222,5 +229,26 @@ export interface StagingDetail {
   suggested_product_id: number | null;
   created_at: string;
   image_url: string | null;
+  media?: StagingMediaItem[];
   variants: StagingVariantSummary[];
+}
+
+export interface BrandListItem {
+  id: number;
+  name: string;
+  slug: string;
+}
+
+export interface CategoryListItem {
+  id: number;
+  name: string;
+  slug: string;
+  parent_id: number | null;
+}
+
+export interface MasterVariantDto {
+  id: number;
+  internal_sku: string;
+  gtin: string | null;
+  options: Record<string, string>;
 }

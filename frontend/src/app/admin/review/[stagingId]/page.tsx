@@ -46,9 +46,24 @@ export default function AdminReviewDetailPage() {
   const [createTitle, setCreateTitle] = React.useState("");
   const [createDescription, setCreateDescription] = React.useState("");
   const [createBrandId, setCreateBrandId] = React.useState<string>("");
+  const [createCategoryIds, setCreateCategoryIds] = React.useState<number[]>([]);
+  const [selectedMediaIds, setSelectedMediaIds] = React.useState<number[]>([]);
   const [rejectReason, setRejectReason] = React.useState("");
   const [rejectNotes, setRejectNotes] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+
+  const { data: brands } = useSWR(
+    flow === "create" ? "/api/admin/brands" : null,
+    apiFetcher
+  );
+  const { data: categories } = useSWR(
+    flow === "create" ? "/api/admin/categories" : null,
+    apiFetcher
+  );
+
+  const [masterVariants, setMasterVariants] = React.useState<Array<{ id: number; internal_sku: string; gtin: string | null; options: Record<string, string> }>>([]);
+  type VariantRowChoice = { type: "link"; masterVariantId: number | null } | { type: "add_new"; attributes: Record<string, string> };
+  const [variantChoices, setVariantChoices] = React.useState<Record<number, VariantRowChoice>>({});
 
   React.useEffect(() => {
     if (detail?.raw_title) setCreateTitle(detail.raw_title);
@@ -70,12 +85,29 @@ export default function AdminReviewDetailPage() {
 
   const handleSelectMaster = async (masterId: number) => {
     setSelectedMasterId(masterId);
+    setVariantMatch(null);
+    setMasterVariants([]);
+    setVariantChoices({});
     try {
-      const match = await apiClient.getVariantMatch(stagingId, masterId);
+      const [match, variants] = await Promise.all([
+        apiClient.getVariantMatch(stagingId, masterId),
+        apiClient.getProductVariants(masterId),
+      ]);
       setVariantMatch(match);
+      setMasterVariants(variants);
+      const initial: Record<number, VariantRowChoice> = {};
+      match.matches.forEach((m: { staging_variant_id: number; suggested_master_variant_id: number | null; staging_options: Record<string, string> }) => {
+        if (m.suggested_master_variant_id != null) {
+          initial[m.staging_variant_id] = { type: "link", masterVariantId: m.suggested_master_variant_id };
+        } else {
+          initial[m.staging_variant_id] = { type: "add_new", attributes: m.staging_options || {} };
+        }
+      });
+      setVariantChoices(initial);
     } catch (e) {
-      toast.error("Failed to load variant match");
+      toast.error("Failed to load variant match or master variants");
       setVariantMatch(null);
+      setMasterVariants([]);
     }
   };
 
@@ -113,6 +145,8 @@ export default function AdminReviewDetailPage() {
           title: createTitle.trim(),
           description: createDescription.trim() || undefined,
           brand_id: createBrandId ? Number(createBrandId) : undefined,
+          category_ids: createCategoryIds.length ? createCategoryIds : undefined,
+          selected_media_ids: selectedMediaIds.length ? selectedMediaIds : undefined,
         },
       });
       toast.success("Master product created and approved");
@@ -124,18 +158,46 @@ export default function AdminReviewDetailPage() {
     }
   };
 
+  const toggleMediaSelection = (id: number) => {
+    setSelectedMediaIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleCategory = (id: number) => {
+    setCreateCategoryIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
   const handleSubmitLinkExisting = async () => {
     if (selectedMasterId == null || !variantMatch?.matches?.length) {
       toast.error("Select a master product and ensure variant match is loaded");
       return;
     }
+    const stagingIds = variantMatch.matches.map((m: any) => m.staging_variant_id);
+    const missing = stagingIds.filter((id: number) => {
+      const c = variantChoices[id];
+      if (!c) return true;
+      if (c.type === "link" && c.masterVariantId == null) return true;
+      return false;
+    });
+    if (missing.length > 0) {
+      toast.error("Choose link (select a master variant) or add new for every staging variant");
+      return;
+    }
+    const variant_mapping = stagingIds.map((stagingVariantId: number) => {
+      const choice = variantChoices[stagingVariantId];
+      if (choice.type === "link" && choice.masterVariantId != null) {
+        return { staging_variant_id: stagingVariantId, master_variant_id: choice.masterVariantId };
+      }
+      return {
+        staging_variant_id: stagingVariantId,
+        new_variant_attributes: choice.type === "add_new" ? choice.attributes : {},
+      };
+    });
     setSubmitting(true);
     try {
-      const variant_mapping = variantMatch.matches.map((m: any) => ({
-        staging_variant_id: m.staging_variant_id,
-        master_variant_id: m.suggested_master_variant_id,
-        new_variant_attributes: m.staging_options || {},
-      }));
       await apiClient.submitReviewDecision(stagingId, {
         action: "LINK_EXISTING",
         master_product_id: selectedMasterId,
@@ -291,17 +353,63 @@ export default function AdminReviewDetailPage() {
             )}
             {variantMatch && (
               <div className="border-t border-border pt-4">
-                <p className="text-sm font-medium text-foreground mb-2">Variant match</p>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  {variantMatch.matches.map((m: any) => (
-                    <li key={m.staging_variant_id}>
-                      Staging variant {m.staging_variant_id} → {m.match_reason}
-                      {m.suggested_master_variant_id != null
-                        ? ` → Master variant ${m.suggested_master_variant_id}`
-                        : " (no match)"}
-                    </li>
-                  ))}
-                </ul>
+                <p className="text-sm font-medium text-foreground mb-2">Map each staging variant: link to existing or add new</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left py-2 pr-2">Staging (SKU / options)</th>
+                        <th className="text-left py-2 pr-2">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {variantMatch.matches.map((m: any) => {
+                        const choice = variantChoices[m.staging_variant_id];
+                        return (
+                          <tr key={m.staging_variant_id} className="border-b border-border">
+                            <td className="py-2 pr-2 align-top">
+                              <span className="font-mono text-xs">{m.staging_options?.SKU ?? m.staging_variant_id}</span>
+                              {m.staging_options && Object.keys(m.staging_options).filter((k) => k !== "SKU").length > 0 && (
+                                <span className="text-muted-foreground ml-1">
+                                  {JSON.stringify(m.staging_options)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2">
+                              <div className="flex flex-wrap gap-2 items-start">
+                                <Select
+                                  value={choice?.type === "link" && choice.masterVariantId != null ? String(choice.masterVariantId) : "add_new"}
+                                  onValueChange={(v) => {
+                                    if (v === "add_new") {
+                                      setVariantChoices((prev) => ({ ...prev, [m.staging_variant_id]: { type: "add_new", attributes: m.staging_options || {} } }));
+                                    } else {
+                                      setVariantChoices((prev) => ({ ...prev, [m.staging_variant_id]: { type: "link", masterVariantId: Number(v) } }));
+                                    }
+                                  }}
+                                >
+                                  <SelectTrigger className="w-[200px]">
+                                    <SelectValue placeholder="Link or add new..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="add_new">+ Add new variant</SelectItem>
+                                    {masterVariants.map((mv) => (
+                                      <SelectItem key={mv.id} value={String(mv.id)}>
+                                        Link: {mv.internal_sku} {mv.options && Object.keys(mv.options).length ? ` (${JSON.stringify(mv.options)})` : ""}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {choice?.type === "add_new" && (
+                                  <span className="text-xs text-muted-foreground">New variant will use staging options</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
                 <Button
                   className="mt-4"
                   onClick={handleSubmitLinkExisting}
@@ -317,10 +425,10 @@ export default function AdminReviewDetailPage() {
 
         {flow === "create" && (
           <Card className="mt-6" padding="default">
-            <h3 className="font-semibold text-foreground mb-4">Create new master product</h3>
-            <div className="space-y-4 max-w-md">
+            <h3 className="font-semibold text-foreground mb-4">Create new master product (full product page)</h3>
+            <div className="space-y-6 max-w-2xl">
               <div>
-                <label className="text-sm font-medium text-foreground">Title</label>
+                <label className="text-sm font-medium text-foreground">Title *</label>
                 <Input
                   value={createTitle}
                   onChange={(e) => setCreateTitle(e.target.value)}
@@ -339,13 +447,64 @@ export default function AdminReviewDetailPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-foreground">Brand (optional)</label>
-                <Input
-                  value={createBrandId}
-                  onChange={(e) => setCreateBrandId(e.target.value)}
-                  placeholder="Brand ID"
-                  className="mt-1"
-                />
+                <label className="text-sm font-medium text-foreground">Brand</label>
+                <Select value={createBrandId || "none"} onValueChange={(v) => setCreateBrandId(v === "none" ? "" : v)}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select brand..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No brand</SelectItem>
+                    {(brands || []).map((b: { id: number; name: string }) => (
+                      <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-foreground">Categories</label>
+                <p className="text-xs text-muted-foreground mt-0.5">Select one or more</p>
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {(categories || []).map((c: { id: number; name: string }) => (
+                    <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={createCategoryIds.includes(c.id)}
+                        onChange={() => toggleCategory(c.id)}
+                        className="rounded border-border"
+                      />
+                      <span className="text-sm">{c.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {detail.media && detail.media.length > 0 && (
+                <div>
+                  <label className="text-sm font-medium text-foreground">Product images</label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Select images in display order (click to toggle)</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {detail.media.map((m: { id: number; source_url: string; alt_text?: string | null }) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleMediaSelection(m.id)}
+                        className={`relative rounded-lg border-2 overflow-hidden w-20 h-20 shrink-0 block ${
+                          selectedMediaIds.includes(m.id) ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-muted-foreground"
+                        }`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={m.source_url} alt={m.alt_text || ""} className="w-full h-full object-cover" />
+                        {selectedMediaIds.includes(m.id) && (
+                          <span className="absolute bottom-0 right-0 bg-primary text-primary-foreground text-xs px-1">
+                            {selectedMediaIds.indexOf(m.id) + 1}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <p className="text-sm text-muted-foreground mb-2">Variants ({detail.variants?.length ?? 0}) will be created from staging.</p>
               </div>
               <Button onClick={handleSubmitCreateNew} disabled={submitting}>
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}

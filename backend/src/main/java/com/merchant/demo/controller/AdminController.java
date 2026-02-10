@@ -40,6 +40,25 @@ public class AdminController {
         return ResponseEntity.ok(adminService.getQueue(status, pageable));
     }
 
+    @GetMapping("/brands")
+    public ResponseEntity<java.util.List<BrandListItemDto>> listBrands() {
+        return ResponseEntity.ok(adminService.listBrands());
+    }
+
+    @GetMapping("/categories")
+    public ResponseEntity<java.util.List<CategoryListItemDto>> listCategories() {
+        return ResponseEntity.ok(adminService.listCategories());
+    }
+
+    @GetMapping("/products/{productId}/variants")
+    public ResponseEntity<java.util.List<MasterVariantDto>> getProductVariants(@PathVariable Integer productId) {
+        try {
+            return ResponseEntity.ok(adminService.getProductVariants(productId));
+        } catch (NoSuchElementException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
     @GetMapping("/products/search")
     public ResponseEntity<java.util.List<MasterProductSearchDto>> searchProducts(
             @RequestParam(required = false, defaultValue = "") String q) {

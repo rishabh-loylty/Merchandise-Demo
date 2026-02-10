@@ -43,6 +43,15 @@ public class ReviewDecisionRequest {
         private Integer brandId;
         @JsonProperty("category_id")
         private Integer categoryId;
+        /** Multiple category IDs for product_categories (CREATE_NEW). */
+        @JsonProperty("category_ids")
+        private List<Integer> categoryIds;
+        /** Ordered list of staging_media IDs to copy as product media (CREATE_NEW). */
+        @JsonProperty("selected_media_ids")
+        private List<Integer> selectedMediaIds;
+        /** Product-level options definition JSON (e.g. Color, Size) for CREATE_NEW. */
+        @JsonProperty("options_definition")
+        private String optionsDefinition;
     }
 
     @Data
