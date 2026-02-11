@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import useSWR from "swr";
 
 const PAGE_SIZE = 20;
@@ -23,57 +23,36 @@ export default function ProductsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
-  // Tabs: approved | review | issues
   const currentTab = searchParams.get("tab") || "approved";
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Debounce search input to avoid hitting API on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput), 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  // Reset page when tab or search changes
+  useEffect(() => {
+    setPage(0);
+  }, [currentTab, debouncedSearch]);
 
   // -- DATA FETCHING --
-  // Fetching from the single staging endpoint
+  
+  // 1. Fetch the actual products for the current view
   const stagingUrl = merchantSession
-    ? `/api/merchants/${merchantSession.id}/staging?page=${page}&size=${PAGE_SIZE}`
+    ? `/api/merchants/${merchantSession.id}/staging?tab=${currentTab}&page=${page}&size=${PAGE_SIZE}&q=${debouncedSearch}`
     : null;
-
   const { data, isLoading } = useSWR(stagingUrl, apiFetcher);
 
-  // -- CLIENT SIDE FILTERING & LOGIC --
-  const allProducts = data?.content ?? [];
-
-  const filteredData = useMemo(() => {
-    // 1. First apply Search if active
-    let list = allProducts;
-    if (searchInput.trim()) {
-      const q = searchInput.toLowerCase();
-      list = list.filter((p: any) => 
-        p.title?.toLowerCase().includes(q) || 
-        p.vendor?.toLowerCase().includes(q) ||
-        p.sku?.toLowerCase().includes(q)
-      );
-      return list;
-    }
-
-    // 2. Otherwise filter by Tab
-    switch (currentTab) {
-      case "approved":
-        return list.filter((p: any) => p.status === "APPROVED");
-      case "review":
-        return list.filter((p: any) => p.status === "PENDING");
-      case "issues":
-        return list.filter((p: any) => p.status !== "APPROVED" && p.status !== "PENDING");
-      default:
-        return list;
-    }
-  }, [allProducts, currentTab, searchInput]);
-
-  // Dynamic counts for the tab badges based on current page data
-  const counts = {
-    approved: allProducts.filter((p: any) => p.status === "APPROVED").length,
-    review: allProducts.filter((p: any) => p.status === "PENDING").length,
-    issues: allProducts.filter((p: any) => p.status !== "APPROVED" && p.status !== "PENDING").length,
-  };
+  // 2. Fetch total counts for the tab badges (using your existing getStatsForMerchant API)
+  const statsUrl = merchantSession ? `/api/merchants/${merchantSession.id}/stats` : null;
+  const { data: stats } = useSWR(statsUrl, apiFetcher);
 
   const handleTabChange = (tab: string) => {
-    setSearchInput(""); // Clear search when changing tabs
+    setSearchInput(""); 
     router.replace(`/merchant/products?tab=${tab}`);
   };
 
@@ -87,54 +66,48 @@ export default function ProductsPage() {
           <input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search this page..."
+            placeholder="Search all products..."
             className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-4 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="border-b border-border">
         <nav className="-mb-px flex gap-6">
           <TabButton
-            active={currentTab === "approved" && !searchInput}
+            active={currentTab === "approved"}
             onClick={() => handleTabChange("approved")}
             label="Approved"
-            count={counts.approved}
+            count={stats?.liveProducts ?? 0}
             icon={CheckCircle2}
             colorClass="text-success"
           />
           <TabButton
-            active={currentTab === "review" && !searchInput}
+            active={currentTab === "review"}
             onClick={() => handleTabChange("review")}
             label="Under Review"
-            count={counts.review}
+            count={stats?.underReview ?? 0}
             icon={Clock}
             colorClass="text-warning"
           />
           <TabButton
-            active={currentTab === "issues" && !searchInput}
+            active={currentTab === "issues"}
             onClick={() => handleTabChange("issues")}
             label="Needs Attention"
-            count={counts.issues}
+            count={stats?.issues ?? 0}
             icon={AlertTriangle}
             colorClass="text-destructive"
           />
         </nav>
       </div>
 
-      {/* Table Content */}
       <div className="min-h-[400px]">
         {isLoading ? (
           <div className="py-20 text-center text-muted-foreground">Loading catalog...</div>
         ) : (
           <>
-            <ProductTable 
-              data={filteredData} 
-              type={searchInput ? "SEARCH" : currentTab.toUpperCase()} 
-            />
+            <ProductTable data={data?.content ?? []} />
             
-            {/* Standard Pagination (from API) */}
             {data?.totalPages > 1 && (
               <PaginationBar
                 page={page}
@@ -150,6 +123,7 @@ export default function ProductsPage() {
     </div>
   );
 }
+
 
 // -- SUB COMPONENTS --
 

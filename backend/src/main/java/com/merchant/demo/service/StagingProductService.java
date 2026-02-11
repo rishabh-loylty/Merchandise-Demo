@@ -16,7 +16,6 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -68,9 +67,10 @@ public class StagingProductService {
     @Transactional(readOnly = true)
     public DashboardStatsDto getStatsForMerchant(Integer merchantId) {
         ensureMerchantExists(merchantId);
-        long underReview = stagingProductRepository.countByMerchantIdAndStatusIn(merchantId, List.copyOf(UNDER_REVIEW_STATUSES));
+        long underReview = stagingProductRepository.countByMerchantIdAndStatusIn(merchantId,
+                List.copyOf(UNDER_REVIEW_STATUSES));
         long issues = stagingProductRepository.countByMerchantIdAndStatus(merchantId, "REJECTED");
-        long liveProducts = 0L; // TODO: when MerchantOffer repo exists
+        long liveProducts = stagingProductRepository.countByMerchantIdAndStatus(merchantId, "APPROVED");
         long totalSkus = underReview + issues + liveProducts;
         return DashboardStatsDto.builder()
                 .liveProducts(liveProducts)
@@ -78,6 +78,43 @@ public class StagingProductService {
                 .issues(issues)
                 .totalSkus(totalSkus)
                 .build();
+    }
+
+    public Page<StagingProductListItemDto> getProductsByTab(Integer merchantId, String tab, String q,
+            Pageable pageable) {
+        ensureMerchantExists(merchantId);
+
+        // 1. If there is a search query, use the search logic across all statuses
+        if (StringUtils.hasText(q)) {
+            return stagingProductRepository.searchByMerchantId(merchantId, q.trim(), pageable)
+                    .map(this::toStagingListItem);
+        }
+
+        // 2. Otherwise, filter by the specific tab
+        if (tab == null)
+            tab = "APPROVED"; // Default
+
+        switch (tab.toLowerCase()) {
+            case "review":
+                // Uses the list of statuses defined in your Service constants
+                return stagingProductRepository.findByMerchantIdAndStatusIn(
+                        merchantId,
+                        List.copyOf(UNDER_REVIEW_STATUSES),
+                        pageable).map(this::toStagingListItem);
+
+            case "issues":
+                return stagingProductRepository.findByMerchantIdAndStatusOrderByUpdatedAtDesc(
+                        merchantId,
+                        "REJECTED",
+                        pageable).map(this::toStagingListItem);
+
+            case "approved":
+            default:
+                return stagingProductRepository.findByMerchantIdAndStatusOrderByUpdatedAtDesc(
+                        merchantId,
+                        "APPROVED",
+                        pageable).map(this::toStagingListItem);
+        }
     }
 
     private void ensureMerchantExists(Integer merchantId) {

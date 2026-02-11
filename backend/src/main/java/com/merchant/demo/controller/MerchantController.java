@@ -80,14 +80,16 @@ public class MerchantController {
     @GetMapping("/{merchantId}/staging")
     public ResponseEntity<Page<StagingProductListItemDto>> getStaging(
             @PathVariable Integer merchantId,
+            @RequestParam(required = false) String tab,
+            @RequestParam(required = false) String q,
             @PageableDefault(size = 20) Pageable pageable) {
         try {
-            return ResponseEntity.ok(stagingProductService.getStagingForMerchant(merchantId, pageable));
+            return ResponseEntity.ok(stagingProductService.getProductsByTab(merchantId, tab, q, pageable));
         } catch (NoSuchElementException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
     }
-
+    
     @GetMapping("/{merchantId}/issues")
     public ResponseEntity<Page<IssueProductDto>> getIssues(
             @PathVariable Integer merchantId,
