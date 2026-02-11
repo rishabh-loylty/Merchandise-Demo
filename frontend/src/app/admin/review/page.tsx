@@ -163,7 +163,15 @@ const REJECTION_REASONS = [
 	{ value: "other", label: "Other (specify below)" },
 ];
 
-export default function AdminReviewPage() {
+export default function ProductsPage() {
+	return (
+	  <React.Suspense fallback={<div className="py-20 text-center">Loading catalog...</div>}>
+		<AdminReviewPage />
+	  </React.Suspense>
+	);
+  }
+
+export  function AdminReviewPage() {
 	const searchParams = useSearchParams();
 	const router = useRouter();
 	const stagingIdFromUrl = searchParams.get("stagingId");

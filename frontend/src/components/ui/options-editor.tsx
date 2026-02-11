@@ -42,7 +42,7 @@ export function OptionsEditor({ value, onChange }: OptionsEditorProps) {
     const trimmed = newValue.trim();
     if (!trimmed) return;
     // Don't add duplicates
-    if (value[index].values.includes(trimmed)) {
+    if (value?.[index]?.values?.includes(trimmed)) {
       setPendingInputs((prev) => ({ ...prev, [index]: "" }));
       return;
     }
@@ -71,8 +71,8 @@ export function OptionsEditor({ value, onChange }: OptionsEditorProps) {
       handleAddValue(index, inputValue);
     }
     // Backspace on empty input removes last chip
-    if (e.key === "Backspace" && !inputValue && value[index].values.length > 0) {
-      handleRemoveValue(index, value[index].values.length - 1);
+    if (e.key === "Backspace" && !inputValue && (value?.[index]?.values?.length ?? 0) > 0) {
+      handleRemoveValue(index, value?.[index]?.values?.length ?? 0 - 1);
     }
   };
 

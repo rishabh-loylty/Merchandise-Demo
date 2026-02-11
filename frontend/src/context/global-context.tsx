@@ -4,11 +4,12 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useState,
   type ReactNode,
 } from "react";
 
-export type Role = "CUSTOMER" | "MERCHANT" | "ADMIN";
+export type Role = "CUSTOMER" | "MERCHANT" | "ADMIN" | null;
 
 export interface PartnerBank {
   id: number;
@@ -37,10 +38,21 @@ interface GlobalState {
 const GlobalContext = createContext<GlobalState | undefined>(undefined);
 
 export function GlobalProvider({ children }: { children: ReactNode }) {
-  const [currentRole, setCurrentRole] = useState<Role>("CUSTOMER");
+  const [currentRole, setCurrentRole] = useState<Role>(null);
   const [selectedBank, setSelectedBankState] = useState<PartnerBank | null>(null);
   const [merchantSession, setMerchantSessionState] = useState<MerchantSession | null>(null);
 
+  useEffect(() => {
+    if (window.location.pathname.startsWith("/admin")) {
+      setCurrentRole("ADMIN");
+    }
+    if (window.location.pathname.startsWith("/merchant")) {
+      setCurrentRole("MERCHANT");
+    }
+    if (window.location.pathname.startsWith("/store")) {
+      setCurrentRole("CUSTOMER");
+    }
+  }, []);
   const setRole = useCallback((role: Role) => {
     setCurrentRole(role);
   }, []);

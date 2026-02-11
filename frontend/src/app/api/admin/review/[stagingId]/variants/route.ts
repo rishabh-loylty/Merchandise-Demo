@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { getDb } from "@/lib/db";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";

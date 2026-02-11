@@ -45,7 +45,7 @@ export async function POST(
       });
     }
 
-    const merchantId = variantLinks[0].merchant_id;
+    const merchantId = variantLinks?.[0]?.merchant_id;
     const externalIds = variantLinks
       .map((l) => l.external_variant_id)
       .filter(Boolean) as string[];

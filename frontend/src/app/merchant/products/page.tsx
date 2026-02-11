@@ -13,12 +13,22 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react"; // 1. Import Suspense
 import useSWR from "swr";
 
 const PAGE_SIZE = 20;
 
+// 2. Wrap your main component in Suspense in the default export
 export default function ProductsPage() {
+  return (
+    <Suspense fallback={<div className="py-20 text-center">Loading catalog...</div>}>
+      <ProductsContent />
+    </Suspense>
+  );
+}
+
+// 3. Move your existing logic into this new component
+function ProductsContent() {
   const { merchantSession } = useGlobal();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -28,26 +38,20 @@ export default function ProductsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
-  // Debounce search input to avoid hitting API on every keystroke
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), 500);
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Reset page when tab or search changes
   useEffect(() => {
     setPage(0);
   }, [currentTab, debouncedSearch]);
 
-  // -- DATA FETCHING --
-  
-  // 1. Fetch the actual products for the current view
   const stagingUrl = merchantSession
     ? `/api/merchants/${merchantSession.id}/staging?tab=${currentTab}&page=${page}&size=${PAGE_SIZE}&q=${debouncedSearch}`
     : null;
   const { data, isLoading } = useSWR(stagingUrl, apiFetcher);
 
-  // 2. Fetch total counts for the tab badges (using your existing getStatsForMerchant API)
   const statsUrl = merchantSession ? `/api/merchants/${merchantSession.id}/stats` : null;
   const { data: stats } = useSWR(statsUrl, apiFetcher);
 
@@ -125,9 +129,9 @@ export default function ProductsPage() {
 }
 
 
-// -- SUB COMPONENTS --
+// -- SUB COMPONENTS (Stay exactly the same) --
 
-function ProductTable({ data, type }: any) {
+function ProductTable({ data }: any) {
   if (data.length === 0) {
     return (
       <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-muted/20 text-center">
