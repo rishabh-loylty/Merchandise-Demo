@@ -78,7 +78,7 @@ export function Navbar() {
 				}}
 				onLoginAdmin={() => {
 					setRole("ADMIN");
-					router.push("/admin");
+					router.push("/admin/dashboard");
 				}}
 			/>
 		);
@@ -395,16 +395,16 @@ function AdminNavbar({ onExit }: { onExit: () => void }) {
 	const pathname = usePathname();
 
 	const navItems = [
-		{ href: "/admin", label: "Overview", icon: LayoutDashboard },
+		// { href: "/admin", label: "Overview", icon: LayoutDashboard },
 		{ href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
 		{ href: "/admin/queue", label: "Queue", icon: ListChecks },
-		{ href: "/admin/review", label: "Review", icon: ClipboardCheck },
-		{ href: "/admin/catalog", label: "Catalog", icon: Package },
-		{ href: "/admin/merchants", label: "Merchants", icon: Store },
-		{ href: "/admin/brands", label: "Brands", icon: Layers },
-		{ href: "/admin/categories", label: "Categories", icon: Package },
-		{ href: "/admin/partners", label: "Partners", icon: Building2 },
-		{ href: "/admin/margins", label: "Margins", icon: Percent },
+		// { href: "/admin/review", label: "Review", icon: ClipboardCheck },
+		{ href: "/admin/catalog", label: "Master Catalog", icon: Package },
+		// { href: "/admin/merchants", label: "Merchants", icon: Store },
+		// { href: "/admin/brands", label: "Brands", icon: Layers },
+		// { href: "/admin/categories", label: "Categories", icon: Package },
+		// { href: "/admin/partners", label: "Partners", icon: Building2 },
+		// { href: "/admin/margins", label: "Margins", icon: Percent },
 		{ href: "/admin/store-config", label: "Store Config", icon: Paintbrush },
 	];
 
