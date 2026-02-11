@@ -83,37 +83,39 @@ public class StagingProductService {
     public Page<StagingProductListItemDto> getProductsByTab(Integer merchantId, String tab, String q,
             Pageable pageable) {
         ensureMerchantExists(merchantId);
+        String resolvedTab = (tab == null) ? "approved" : tab.toLowerCase();
 
-        // 1. If there is a search query, use the search logic across all statuses
-        if (StringUtils.hasText(q)) {
-            return stagingProductRepository.searchByMerchantId(merchantId, q.trim(), pageable)
+        List<String> statuses;
+        switch (resolvedTab) {
+            case "review":
+                statuses = List.copyOf(UNDER_REVIEW_STATUSES);
+                break;
+            case "issues":
+                statuses = List.of("REJECTED");
+                break;
+            case "approved":
+            default:
+                statuses = List.of("APPROVED");
+        }
+
+        boolean hasQuery = StringUtils.hasText(q) && !q.isBlank();
+        String trimmedQuery = (q != null) ? q.trim() : null;
+
+        if (hasQuery) {
+            // Use search logic with the determined statuses and query
+            return stagingProductRepository
+                    .searchByMerchantIdAndStatusIn(merchantId, statuses, trimmedQuery, pageable)
                     .map(this::toStagingListItem);
         }
 
-        // 2. Otherwise, filter by the specific tab
-        if (tab == null)
-            tab = "APPROVED"; // Default
-
-        switch (tab.toLowerCase()) {
-            case "review":
-                // Uses the list of statuses defined in your Service constants
-                return stagingProductRepository.findByMerchantIdAndStatusIn(
-                        merchantId,
-                        List.copyOf(UNDER_REVIEW_STATUSES),
-                        pageable).map(this::toStagingListItem);
-
-            case "issues":
-                return stagingProductRepository.findByMerchantIdAndStatusOrderByUpdatedAtDesc(
-                        merchantId,
-                        "REJECTED",
-                        pageable).map(this::toStagingListItem);
-
-            case "approved":
-            default:
-                return stagingProductRepository.findByMerchantIdAndStatusOrderByUpdatedAtDesc(
-                        merchantId,
-                        "APPROVED",
-                        pageable).map(this::toStagingListItem);
+        if (resolvedTab.equals("review")) {
+            return stagingProductRepository
+                    .findByMerchantIdAndStatusIn(merchantId, statuses, pageable)
+                    .map(this::toStagingListItem);
+        } else {
+            return stagingProductRepository
+                    .findByMerchantIdAndStatusOrderByUpdatedAtDesc(merchantId, statuses.get(0), pageable)
+                    .map(this::toStagingListItem);
         }
     }
 

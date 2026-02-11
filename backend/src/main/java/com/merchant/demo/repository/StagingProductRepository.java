@@ -66,6 +66,18 @@ public interface StagingProductRepository extends JpaRepository<StagingProduct, 
            "LOWER(v.rawSku) LIKE LOWER(CONCAT(CONCAT('%', :q), '%')))")
     Page<StagingProduct> searchByMerchantId(@Param("merchantId") Integer merchantId, @Param("q") String q, Pageable pageable);
 
+    @Query("SELECT DISTINCT p FROM StagingProduct p LEFT JOIN p.variants v " +
+           "WHERE p.merchantId = :merchantId AND p.status IN :statuses AND (" +
+           "LOWER(p.rawTitle) LIKE LOWER(CONCAT(CONCAT('%', :q), '%')) OR " +
+           "LOWER(p.rawVendor) LIKE LOWER(CONCAT(CONCAT('%', :q), '%')) OR " +
+           "LOWER(p.rawProductType) LIKE LOWER(CONCAT(CONCAT('%', :q), '%')) OR " +
+           "LOWER(v.rawSku) LIKE LOWER(CONCAT(CONCAT('%', :q), '%')))")
+    Page<StagingProduct> searchByMerchantIdAndStatusIn(
+        @Param("merchantId") Integer merchantId, 
+        @Param("statuses") List<String> statuses, 
+        @Param("q") String q, 
+        Pageable pageable);
+
     /*
     SELECT count(id) 
     FROM staging_products 
